@@ -2395,8 +2395,8 @@ function get_referer($stripquery = true) {
  * @deprecated since Moodle 3.0 use \core_useragent::is_web_crawler instead.
  */
 function is_web_crawler() {
-    debugging("is_web_crawler() has been deprecated, please use \\core_useragent\\is_web_crawler() instead.", DEBUG_DEVELOPER);
-    return core_useragent::is_crawler();
+    debugging('is_web_crawler() has been deprecated, please use core_useragent::is_web_crawler() instead.', DEBUG_DEVELOPER);
+    return core_useragent::is_web_crawler();
 }
 
 /**
@@ -2722,4 +2722,22 @@ function coursetag_delete_course_tags($courseid, $showfeedback=false) {
     if ($showfeedback) {
         echo $OUTPUT->notification(get_string('deletedcoursetags', 'tag'), 'notifysuccess');
     }
+}
+
+/**
+ * Function that returns tags that start with some text, for use by the autocomplete feature
+ *
+ * @package core_tag
+ * @deprecated since 3.0
+ * @access  private
+ * @param   string   $text string that the tag names will be matched against
+ * @return  mixed    an array of objects, or false if no records were found or an error occured.
+ */
+function tag_autocomplete($text) {
+    debugging('Function tag_autocomplete() is deprecated without replacement. ' .
+            'New form element "tags" does proper autocomplete.', DEBUG_DEVELOPER);
+    global $DB;
+    return $DB->get_records_sql("SELECT tg.id, tg.name, tg.rawname
+                                   FROM {tag} tg
+                                  WHERE tg.name LIKE ?", array(core_text::strtolower($text)."%"));
 }

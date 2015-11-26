@@ -26,6 +26,7 @@
 require_once(dirname(dirname(__FILE__)).'/config.php');
 require_once('lib.php');
 require_once('locallib.php');
+require_once($CFG->dirroot .'/comment/lib.php');
 
 $action   = required_param('action', PARAM_ALPHA);
 $id       = optional_param('entryid', 0, PARAM_INT);
@@ -115,6 +116,9 @@ $output = $PAGE->get_renderer('blog');
 $strblogs = get_string('blogs', 'blog');
 
 if ($action === 'delete') {
+    // Init comment JS strings.
+    comment::init();
+
     if (empty($entry->id)) {
         print_error('wrongentryid', 'blog');
     }
@@ -134,6 +138,9 @@ if ($action === 'delete') {
         $PAGE->set_heading($SITE->fullname);
         echo $OUTPUT->header();
 
+        // Output edit mode title.
+        echo $OUTPUT->heading($strblogs . ': ' . get_string('deleteentry', 'blog'), 2);
+
         // Output the entry.
         $entry->prepare_render();
         echo $output->render($entry);
@@ -146,10 +153,12 @@ if ($action === 'delete') {
         die;
     }
 } else if ($action == 'add') {
-    $PAGE->set_title("$SITE->shortname: $strblogs: " . get_string('addnewentry', 'blog'));
+    $editmodetitle = $strblogs . ': ' . get_string('addnewentry', 'blog');
+    $PAGE->set_title("$SITE->shortname: $editmodetitle");
     $PAGE->set_heading(fullname($USER));
 } else if ($action == 'edit') {
-    $PAGE->set_title("$SITE->shortname: $strblogs: " . get_string('editentry', 'blog'));
+    $editmodetitle = $strblogs . ': ' . get_string('editentry', 'blog');
+    $PAGE->set_title("$SITE->shortname: $editmodetitle");
     $PAGE->set_heading(fullname($USER));
 }
 
@@ -270,6 +279,10 @@ $entry->modid = $modid;
 $entry->courseid = $courseid;
 
 echo $OUTPUT->header();
+// Output title for editing mode.
+if (isset($editmodetitle)) {
+    echo $OUTPUT->heading($editmodetitle, 2);
+}
 $blogeditform->display();
 echo $OUTPUT->footer();
 

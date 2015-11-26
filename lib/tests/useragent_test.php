@@ -29,7 +29,7 @@
  * @copyright  2013 Sam Hemelryk
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class core_useragent_testcase extends basic_testcase {
+class core_useragent_testcase extends advanced_testcase {
 
     /**
      * Restores the user agent to the default one.
@@ -42,6 +42,68 @@ class core_useragent_testcase extends basic_testcase {
         // Note: When adding new entries to this list, please ensure that any new browser versions are added to the corresponding list.
         // This ensures that regression tests are applied to all known user agents.
         return array(
+            'Microsoft Edge for Windows 10 Desktop' => array(
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.135 Safari/537.36 Edge/12.10136',
+                array(
+                    'is_edge'                       => true,
+                    'check_edge_version'            => array(
+                        '12'                        => true,
+                    ),
+
+                    // Edge pretends to be WebKit.
+                    'is_webkit'                     => true,
+
+                    // Edge pretends to be Chrome.
+                    // Note: Because Edge pretends to be Chrome, it will not be picked up as a Safari browser.
+                    'is_chrome'                     => true,
+                    'check_chrome_version'          => array(
+                        '7'                         => true,
+                        '8'                         => true,
+                        '10'                        => true,
+                        '39'                        => true,
+                    ),
+
+                    'versionclasses'                => array(
+                        'safari',
+                    ),
+                ),
+            ),
+            'Microsoft Edge for Windows 10 Mobile' => array(
+                'Mozilla/5.0 (Windows Phone 10.0; Android 4.2.1; DEVICE INFO) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.135 Mobile Safari/537.36 Edge/12.10136',
+                array(
+                    'is_edge'                       => true,
+                    'check_edge_version'              => array(
+                        '12'                        => true,
+                    ),
+
+                    // Edge pretends to be WebKit.
+                    'is_webkit'                     => true,
+
+                    // Mobile Edge pretends to be Android.
+                    'is_webkit_android'             => true,
+                    'check_webkit_android_version'  => array(
+                        '525'                       => true,
+                        '527'                       => true,
+                    ),
+
+                    // Edge pretends to be Chrome.
+                    // Note: Because Edge pretends to be Chrome, it will not be picked up as a Safari browser.
+                    'is_chrome'                     => true,
+                    'check_chrome_version'          => array(
+                        '7'                         => true,
+                        '8'                         => true,
+                        '10'                        => true,
+                        '39'                        => true,
+                    ),
+
+                    'versionclasses'                => array(
+                        'safari',
+                        'android',
+                    ),
+
+                    'devicetype'                    => 'mobile',
+                ),
+            ),
             // Windows 98; Internet Explorer 5.0.
             array(
                 'Mozilla/4.0 (compatible; MSIE 5.00; Windows 98)',
@@ -1341,6 +1403,37 @@ class core_useragent_testcase extends basic_testcase {
     /**
      * @dataProvider user_agents_providers
      */
+    public function test_useragent_edge($useragent, $tests) {
+        // Setup the core_useragent instance.
+        core_useragent::instance(true, $useragent);
+
+        // Edge Tests.
+        if (isset($tests['is_edge']) && $tests['is_edge']) {
+            $this->assertTrue(core_useragent::is_edge());
+        } else {
+            $this->assertFalse(core_useragent::is_edge());
+        }
+
+        $versions = array(
+            // New versions of should be added here.
+            '12'   => false,
+        );
+
+        if (isset($tests['check_edge_version'])) {
+            // The test provider has overwritten some of the above checks.
+            // Must use the '+' operator, because array_merge will incorrectly rewrite the array keys for integer-based indexes.
+            $versions = $tests['check_edge_version'] + $versions;
+        }
+
+        foreach ($versions as $version => $result) {
+            $this->assertEquals($result, core_useragent::check_edge_version($version),
+                "Version incorrectly determined for Edge version '{$version}'");
+        }
+    }
+
+    /**
+     * @dataProvider user_agents_providers
+     */
     public function test_useragent_ie($useragent, $tests) {
         // Setup the core_useragent instance.
         core_useragent::instance(true, $useragent);
@@ -1771,5 +1864,62 @@ class core_useragent_testcase extends basic_testcase {
 
         $expectation = isset($tests['is_web_crawler']) ? $tests['is_web_crawler'] : false;
         $this->assertSame($expectation, core_useragent::is_web_crawler());
+    }
+
+    /**
+     * Regression tests for the deprecated is_web_crawler() function
+     */
+    public function test_deprecated_is_web_crawler() {
+
+        $browsers = array(
+            'Mozilla/5.0 (Windows; U; MSIE 9.0; WIndows NT 9.0; en-US))',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.8; rv:18.0) Gecko/18.0 Firefox/18.0',
+            'Mozilla/5.0 (Macintosh; U; PPC Mac OS X; en) AppleWebKit/412 (KHTML, like Gecko) Safari/412',
+            'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_5; en-US) AppleWebKit/534.10 (KHTML, like Gecko) Chrome/8.0.552.215 Safari/534.10',
+            'Opera/9.0 (Windows NT 5.1; U; en)',
+            'Mozilla/5.0 (Linux; U; Android 2.1; en-us; Nexus One Build/ERD62) AppleWebKit/530.17 (KHTML, like Gecko) Version/4.0 Mobile Safari/530.17 –Nexus',
+            'Mozilla/5.0 (iPad; U; CPU OS 4_2_1 like Mac OS X; en-us) AppleWebKit/533.17.9 (KHTML, like Gecko) Version/5.0.2 Mobile/8C148 Safari/6533.18.5',
+        );
+        $crawlers = array(
+            // Google.
+            'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+            'Googlebot/2.1 (+http://www.googlebot.com/bot.html)',
+            'Googlebot-Image/1.0',
+            // Yahoo.
+            'Mozilla/5.0 (compatible; Yahoo! Slurp; http://help.yahoo.com/help/us/ysearch/slurp)',
+            // Bing.
+            'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',
+            'Mozilla/5.0 (compatible; bingbot/2.0 +http://www.bing.com/bingbot.htm)',
+            // MSN.
+            'msnbot/2.1',
+            // Yandex.
+            'Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)',
+            'Mozilla/5.0 (compatible; YandexImages/3.0; +http://yandex.com/bots)',
+            // AltaVista.
+            'AltaVista V2.0B crawler@evreka.com',
+            // ZoomSpider.
+            'ZoomSpider - wrensoft.com [ZSEBOT]',
+            // Baidu.
+            'Baiduspider+(+http://www.baidu.com/search/spider_jp.html)',
+            'Baiduspider+(+http://www.baidu.com/search/spider.htm)',
+            'BaiDuSpider',
+            // Ask.com.
+            'User-Agent: Mozilla/2.0 (compatible; Ask Jeeves/Teoma)',
+        );
+
+        foreach ($browsers as $agent) {
+            core_useragent::instance(true, $agent);
+            $this->assertSame($agent, core_useragent::get_user_agent_string());
+            $this->assertFalse(is_web_crawler());
+            $this->assertDebuggingCalled('is_web_crawler() has been deprecated, please use core_useragent::is_web_crawler() instead.',
+                DEBUG_DEVELOPER);
+        }
+        foreach ($crawlers as $agent) {
+            core_useragent::instance(true, $agent);
+            $this->assertSame($agent, core_useragent::get_user_agent_string());
+            $this->assertTrue(is_web_crawler(), "$agent should be considered a search engine");
+            $this->assertDebuggingCalled('is_web_crawler() has been deprecated, please use core_useragent::is_web_crawler() instead.',
+                DEBUG_DEVELOPER);
+        }
     }
 }

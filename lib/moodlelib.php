@@ -3547,9 +3547,6 @@ function get_extra_user_fields_sql($context, $alias='', $prefix='', $already = a
 function get_user_field_name($field) {
     // Some fields have language strings which are not the same as field name.
     switch ($field) {
-        case 'phone1' : {
-            return get_string('phone');
-        }
         case 'url' : {
             return get_string('webpage');
         }
@@ -3809,8 +3806,10 @@ function update_user_record_by_id($id) {
         $customfields = $userauth->get_custom_user_profile_fields();
 
         foreach ($newinfo as $key => $value) {
-            $key = strtolower($key);
             $iscustom = in_array($key, $customfields);
+            if (!$iscustom) {
+                $key = strtolower($key);
+            }
             if ((!property_exists($oldinfo, $key) && !$iscustom) or $key === 'username' or $key === 'id'
                     or $key === 'auth' or $key === 'mnethostid' or $key === 'deleted') {
                 // Unknown or must not be changed.
@@ -4937,7 +4936,6 @@ function remove_course_contents($courseid, $showfeedback = true, array $options 
     $oldcourse->summary          = '';
     $oldcourse->cacherev         = 0;
     $oldcourse->legacyfiles      = 0;
-    $oldcourse->enablecompletion = 0;
     if (!empty($options['keep_groups_and_groupings'])) {
         $oldcourse->defaultgroupingid = 0;
     }
@@ -5065,6 +5063,11 @@ function reset_course_userdata($data) {
                          SET timestart = timestart + ?
                        WHERE courseid=? AND instance=0";
         $DB->execute($updatesql, array($data->timeshift, $data->courseid));
+
+        // Update any date activity restrictions.
+        if ($CFG->enableavailability) {
+            \availability_date\condition::update_all_dates($data->courseid, $data->timeshift);
+        }
 
         $status[] = array('component' => $componentstr, 'item' => get_string('datechanged'), 'error' => false);
     }
@@ -8638,7 +8641,6 @@ function message_popup_window() {
                      FROM {message} m
                      JOIN {message_working} mw ON m.id=mw.unreadmessageid
                      JOIN {message_processors} p ON mw.processorid=p.id
-                     JOIN {user} u ON m.useridfrom=u.id
                      LEFT JOIN {message_contacts} c ON c.contactid = m.useridfrom
                                                    AND c.userid = m.useridto
                     WHERE m.useridto = :userid

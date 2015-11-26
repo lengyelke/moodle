@@ -308,6 +308,7 @@ class graded_users_iterator {
                     $grades[$grade_item->id] =
                         new grade_grade(array('userid'=>$user->id, 'itemid'=>$grade_item->id), false);
                 }
+                $grades[$grade_item->id]->grade_item = $grade_item;
             }
         }
 
@@ -2832,9 +2833,9 @@ abstract class grade_helper {
         $context = context_course::instance($courseid);
         self::$managesetting = array();
         if ($courseid != SITEID && has_capability('moodle/grade:manage', $context)) {
-            self::$managesetting['categoriesanditems'] = new grade_plugin_info('setup',
+            self::$managesetting['gradebooksetup'] = new grade_plugin_info('setup',
                 new moodle_url('/grade/edit/tree/index.php', array('id' => $courseid)),
-                get_string('categoriesanditems', 'grades'));
+                get_string('gradebooksetup', 'grades'));
             self::$managesetting['coursesettings'] = new grade_plugin_info('coursesettings',
                 new moodle_url('/grade/edit/settings/index.php', array('id'=>$courseid)),
                 get_string('coursegradesettings', 'grades'));
@@ -3141,9 +3142,6 @@ abstract class grade_helper {
                                                     JOIN {user_info_category} c ON f.categoryid=c.id
                                                     WHERE f.shortname $wherefields
                                                     ORDER BY c.sortorder ASC, f.sortorder ASC", $whereparams);
-            if (!is_array($customfields)) {
-                continue;
-            }
 
             foreach ($customfields as $field) {
                 // Make sure we can display this custom field
