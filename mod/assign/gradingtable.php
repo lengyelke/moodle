@@ -228,7 +228,7 @@ class assign_grading_table extends table_sql implements renderable {
         }
 
         if ($this->assignment->get_instance()->markingworkflow) {
-            $workflowstates = $this->assignment->get_marking_workflow_states_for_current_user();
+            $workflowstates = $this->assignment->get_all_marking_workflow_states();
             if (!empty($workflowstates)) {
                 $workflowfilter = get_user_preferences('assign_workflowfilter', '');
                 if ($workflowfilter == ASSIGN_MARKING_WORKFLOW_STATE_NOTMARKED) {

@@ -3288,11 +3288,13 @@ class assign {
         $markingworkflow = $this->get_instance()->markingworkflow;
         // Get marking states to show in form.
         $markingworkflowoptions = array();
+        $allmarkingworkflowstates = array();
         if ($markingworkflow) {
             $notmarked = get_string('markingworkflowstatenotmarked', 'assign');
             $markingworkflowoptions[''] = get_string('filternone', 'assign');
             $markingworkflowoptions[ASSIGN_MARKING_WORKFLOW_STATE_NOTMARKED] = $notmarked;
             $markingworkflowoptions = array_merge($markingworkflowoptions, $this->get_marking_workflow_states_for_current_user());
+            $allmarkingworkflowstates = $this->get_all_marking_workflow_states();
         }
 
         // Print options for changing the filter and changing the number of results per page.
@@ -3303,6 +3305,7 @@ class assign {
                                           'showquickgrading'=>$showquickgrading,
                                           'quickgrading'=>$quickgrading,
                                           'markingworkflowopt'=>$markingworkflowoptions,
+                                          'allmarkingworkflowstates'=>$allmarkingworkflowstates,
                                           'markingallocationopt'=>$markingallocationoptions,
                                           'showonlyactiveenrolopt'=>$showonlyactiveenrolopt,
                                           'showonlyactiveenrol'=>$this->show_only_active_users());
@@ -5627,11 +5630,13 @@ class assign {
 
         // Get marking states to show in form.
         $markingworkflowoptions = array();
+        $allmarkingworkflowstates = array();
         if ($this->get_instance()->markingworkflow) {
             $notmarked = get_string('markingworkflowstatenotmarked', 'assign');
             $markingworkflowoptions[''] = get_string('filternone', 'assign');
             $markingworkflowoptions[ASSIGN_MARKING_WORKFLOW_STATE_NOTMARKED] = $notmarked;
             $markingworkflowoptions = array_merge($markingworkflowoptions, $this->get_marking_workflow_states_for_current_user());
+            $allmarkingworkflowstates = $this->get_all_marking_workflow_states();
         }
 
         $gradingoptionsparams = array('cm'=>$this->get_course_module()->id,
@@ -5641,6 +5646,7 @@ class assign {
                                       'showquickgrading'=>$showquickgrading,
                                       'quickgrading'=>false,
                                       'markingworkflowopt' => $markingworkflowoptions,
+                                      'allmarkingworkflowstates'=>$allmarkingworkflowstates,
                                       'markingallocationopt' => $markingallocationoptions,
                                       'showonlyactiveenrolopt'=>$showonlyactiveenrolopt,
                                       'showonlyactiveenrol'=>$this->show_only_active_users());
@@ -7341,6 +7347,25 @@ class assign {
         }
         $this->markingworkflowstates = $states;
         return $this->markingworkflowstates;
+    }
+    
+    /**
+     * Get the list of ALL marking_workflow states for FILTERING.
+     *
+     * @return array of state => description
+     */
+    public function get_all_marking_workflow_states() {
+       
+        $states = array();
+        // do NOT need any capability, this is for FILTERING ONLY
+        $states[ASSIGN_MARKING_WORKFLOW_STATE_NOTMARKED] = get_string('markingworkflowstatenotmarked', 'assign');
+        $states[ASSIGN_MARKING_WORKFLOW_STATE_INMARKING] = get_string('markingworkflowstateinmarking', 'assign');
+        $states[ASSIGN_MARKING_WORKFLOW_STATE_READYFORREVIEW] = get_string('markingworkflowstatereadyforreview', 'assign');
+        $states[ASSIGN_MARKING_WORKFLOW_STATE_INREVIEW] = get_string('markingworkflowstateinreview', 'assign');
+        $states[ASSIGN_MARKING_WORKFLOW_STATE_READYFORRELEASE] = get_string('markingworkflowstatereadyforrelease', 'assign');
+        $states[ASSIGN_MARKING_WORKFLOW_STATE_RELEASED] = get_string('markingworkflowstatereleased', 'assign');
+               
+        return $states;
     }
 
     /**

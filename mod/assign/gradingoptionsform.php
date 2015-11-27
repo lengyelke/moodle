@@ -61,7 +61,7 @@ class mod_assign_grading_options_form extends moodleform {
         }
         if (!empty($instance['markingworkflowopt'])) {
             $workflowfilter = get_string('workflowfilter', 'assign');
-            $mform->addElement('select', 'workflowfilter', $workflowfilter, $instance['markingworkflowopt'], $dirtyclass);
+            $mform->addElement('select', 'workflowfilter', $workflowfilter, $instance['allmarkingworkflowstates'], $dirtyclass);
         }
         // Quickgrading.
         if ($instance['showquickgrading']) {
