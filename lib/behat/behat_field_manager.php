@@ -48,22 +48,10 @@ class behat_field_manager {
      * @return behat_form_field
      */
     public static function get_form_field_from_label($label, RawMinkContext $context) {
-
         // There are moodle form elements that are not directly related with
         // a basic HTML form field, we should also take care of them.
-        try {
-            // The DOM node.
-            $fieldnode = $context->find_field($label);
-        } catch (ElementNotFoundException $fieldexception) {
-
-            // Looking for labels that points to filemanagers.
-            try {
-                $fieldnode = $context->find_filemanager($label);
-            } catch (ElementNotFoundException $filemanagerexception) {
-                // We want the generic 'field' exception.
-                throw $fieldexception;
-            }
-        }
+        // The DOM node.
+        $fieldnode = $context->find_field($label);
 
         // The behat field manager.
         return self::get_form_field($fieldnode, $context->getSession());
@@ -113,7 +101,6 @@ class behat_field_manager {
      * @return behat_form_field
      */
     public static function get_field_instance($type, NodeElement $fieldnode, Session $session) {
-
         global $CFG;
 
         // If the field is not part of a moodleform, we should still try to find out
@@ -149,6 +136,11 @@ class behat_field_manager {
      */
     public static function guess_field_type(NodeElement $fieldnode, Session $session) {
 
+        // If the type is explicitly set on the element pointed to by the label - use it.
+        if ($fieldtype = $fieldnode->getAttribute('data-fieldtype')) {
+            return self::normalise_fieldtype($fieldtype);
+        }
+
         // Textareas are considered text based elements.
         $tagname = strtolower($fieldnode->getTagName());
         if ($tagname == 'textarea') {
@@ -183,6 +175,10 @@ class behat_field_manager {
         } else if ($tagname == 'select') {
             // Select tag.
             return 'select';
+        } else if ($tagname == 'span') {
+            if ($fieldnode->hasAttribute('data-inplaceeditable') && $fieldnode->getAttribute('data-inplaceeditable')) {
+                return 'inplaceeditable';
+            }
         }
 
         // We can not provide a closer field type.
@@ -204,7 +200,6 @@ class behat_field_manager {
 
         // We already waited when getting the NodeElement and we don't want an exception if it's not part of a moodleform.
         $parentformfound = $fieldnode->find('xpath',
-            "/ancestor::fieldset" .
             "/ancestor::form[contains(concat(' ', normalize-space(@class), ' '), ' mform ')]"
         );
 
@@ -228,9 +223,31 @@ class behat_field_manager {
             return 'availability';
         }
 
-        // We look for a parent node with 'felement' class.
-        if ($class = $fieldnode->getParent()->getAttribute('class')) {
+        if ($fieldnode->getTagName() == 'html') {
+            return false;
+        }
 
+        // If the type is explictly set on the element pointed to by the label - use it.
+        $fieldtype = $fieldnode->getAttribute('data-fieldtype');
+        if ($fieldtype) {
+            return self::normalise_fieldtype($fieldtype);
+        }
+
+        if (!empty($fieldnode->find('xpath', '/ancestor::*[@data-passwordunmaskid]'))) {
+            return 'passwordunmask';
+        }
+
+        // Fetch the parentnode only once.
+        $parentnode = $fieldnode->getParent();
+
+        // Check the parent fieldtype before we check classes.
+        $fieldtype = $parentnode->getAttribute('data-fieldtype');
+        if ($fieldtype) {
+            return self::normalise_fieldtype($fieldtype);
+        }
+
+        // We look for a parent node with 'felement' class.
+        if ($class = $parentnode->getAttribute('class')) {
             if (strstr($class, 'felement') != false) {
                 // Remove 'felement f' from class value.
                 return substr($class, 10);
@@ -242,7 +259,21 @@ class behat_field_manager {
             }
         }
 
-        return self::get_field_node_type($fieldnode->getParent(), $session);
+        return self::get_field_node_type($parentnode, $session);
+    }
+
+    /**
+     * Normalise the field type.
+     *
+     * @param string $fieldtype
+     * @return string
+     */
+    protected static function normalise_fieldtype(string $fieldtype): string {
+        if ($fieldtype === 'tags') {
+            return 'autocomplete';
+        }
+
+        return $fieldtype;
     }
 
     /**
@@ -289,5 +320,4 @@ class behat_field_manager {
 
         return self::get_field_node_type($fieldnode, $session);
     }
-
 }

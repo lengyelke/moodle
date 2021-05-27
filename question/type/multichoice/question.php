@@ -26,6 +26,7 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+require_once($CFG->dirroot . '/question/type/questionbase.php');
 
 /**
  * Base class for multiple choice questions. The parts that are common to
@@ -43,6 +44,10 @@ abstract class qtype_multichoice_base extends question_graded_automatically {
 
     public $shuffleanswers;
     public $answernumbering;
+    /**
+     * @var int standard instruction to be displayed if enabled.
+     */
+    public $showstandardinstruction = 0;
     public $layout = self::LAYOUT_VERTICAL;
 
     public $correctfeedback;
@@ -112,7 +117,7 @@ abstract class qtype_multichoice_base extends question_graded_automatically {
     public function check_file_access($qa, $options, $component, $filearea, $args, $forcedownload) {
         if ($component == 'question' && in_array($filearea,
                 array('correctfeedback', 'partiallycorrectfeedback', 'incorrectfeedback'))) {
-            return $this->check_combined_feedback_file_access($qa, $options, $filearea);
+            return $this->check_combined_feedback_file_access($qa, $options, $filearea, $args);
 
         } else if ($component == 'question' && $filearea == 'answer') {
             $answerid = reset($args); // Itemid is answer id.
@@ -141,6 +146,26 @@ abstract class qtype_multichoice_base extends question_graded_automatically {
             return parent::check_file_access($qa, $options, $component, $filearea,
                     $args, $forcedownload);
         }
+    }
+
+    /**
+     * Return the question settings that define this question as structured data.
+     *
+     * @param question_attempt $qa the current attempt for which we are exporting the settings.
+     * @param question_display_options $options the question display options which say which aspects of the question
+     * should be visible.
+     * @return mixed structure representing the question settings. In web services, this will be JSON-encoded.
+     */
+    public function get_question_definition_for_external_rendering(question_attempt $qa, question_display_options $options) {
+        // This is a partial implementation, returning only the most relevant question settings for now,
+        // ideally, we should return as much as settings as possible (depending on the state and display options).
+
+        return [
+            'shuffleanswers' => $this->shuffleanswers,
+            'answernumbering' => $this->answernumbering,
+            'showstandardinstruction' => $this->showstandardinstruction,
+            'layout' => $this->layout,
+        ];
     }
 }
 
@@ -175,8 +200,7 @@ class qtype_multichoice_single_question extends qtype_multichoice_base {
     }
 
     public function summarise_response(array $response) {
-        if (!array_key_exists('answer', $response) ||
-                !array_key_exists($response['answer'], $this->order)) {
+        if (!$this->is_complete_response($response)) {
             return null;
         }
         $ansid = $this->order[$response['answer']];
@@ -185,8 +209,7 @@ class qtype_multichoice_single_question extends qtype_multichoice_base {
     }
 
     public function classify_response(array $response) {
-        if (!array_key_exists('answer', $response) ||
-                !array_key_exists($response['answer'], $this->order)) {
+        if (!$this->is_complete_response($response)) {
             return array($this->id => question_classified_response::no_response());
         }
         $choiceid = $this->order[$response['answer']];
@@ -229,11 +252,18 @@ class qtype_multichoice_single_question extends qtype_multichoice_base {
     }
 
     public function is_same_response(array $prevresponse, array $newresponse) {
+        if (!$this->is_complete_response($prevresponse)) {
+            $prevresponse = [];
+        }
+        if (!$this->is_complete_response($newresponse)) {
+            $newresponse = [];
+        }
         return question_utils::arrays_same_at_key($prevresponse, $newresponse, 'answer');
     }
 
     public function is_complete_response(array $response) {
-        return array_key_exists('answer', $response) && $response['answer'] !== '';
+        return array_key_exists('answer', $response) && $response['answer'] !== ''
+                && (string) $response['answer'] !== '-1';
     }
 
     public function is_gradable_response(array $response) {

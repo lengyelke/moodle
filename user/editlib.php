@@ -22,6 +22,8 @@
  * @package core_user
  */
 
+require_once($CFG->dirroot . '/user/lib.php');
+
 /**
  * Cancels the requirement for a user to update their email address.
  *
@@ -57,7 +59,7 @@ function useredit_setup_preference_page($userid, $courseid) {
         require_login($course);
     } else if (!isloggedin()) {
         if (empty($SESSION->wantsurl)) {
-            $SESSION->wantsurl = $CFG->httpswwwroot.'/user/preferences.php';
+            $SESSION->wantsurl = $CFG->wwwroot.'/user/preferences.php';
         }
         redirect(get_login_url());
     } else {
@@ -76,7 +78,7 @@ function useredit_setup_preference_page($userid, $courseid) {
 
     // Remote users cannot be edited.
     if (is_mnet_remote_user($user)) {
-        if (user_not_fully_set_up($user)) {
+        if (user_not_fully_set_up($user, false)) {
             $hostwwwroot = $DB->get_field('mnet_host', 'wwwroot', array('id' => $user->mnethostid));
             print_error('usernotfullysetup', 'mnet', '', $hostwwwroot);
         }
@@ -147,79 +149,49 @@ function useredit_load_preferences(&$user, $reload=true) {
 }
 
 /**
- * Updates the user preferences for teh given user.
+ * Updates the user preferences for the given user
  *
- * @param stdClass|array $usernew
+ * Only preference that can be updated directly will be updated here. This method is called from various WS
+ * updating users and should be used when updating user details. Plugins may list preferences that can
+ * be updated by defining 'user_preferences' callback, {@see core_user::fill_preferences_cache()}
+ *
+ * Some parts of code may use user preference table to store internal data, in these cases it is acceptable
+ * to call set_user_preference()
+ *
+ * @param stdClass|array $usernew object or array that has user preferences as attributes with keys starting with preference_
  */
 function useredit_update_user_preference($usernew) {
+    global $USER;
     $ua = (array)$usernew;
+    if (is_object($usernew) && isset($usernew->id) && isset($usernew->deleted) && isset($usernew->confirmed)) {
+        // This is already a full user object, maybe not completely full but these fields are enough.
+        $user = $usernew;
+    } else if (empty($ua['id']) || $ua['id'] == $USER->id) {
+        // We are updating current user.
+        $user = $USER;
+    } else {
+        // Retrieve user object.
+        $user = core_user::get_user($ua['id'], '*', MUST_EXIST);
+    }
+
     foreach ($ua as $key => $value) {
         if (strpos($key, 'preference_') === 0) {
             $name = substr($key, strlen('preference_'));
-            set_user_preference($name, $value, $usernew->id);
+            if (core_user::can_edit_preference($name, $user)) {
+                $value = core_user::clean_preference($value, $name);
+                set_user_preference($name, $value, $user->id);
+            }
         }
     }
 }
 
 /**
- * Updates the provided users profile picture based upon the expected fields returned from the edit or edit_advanced forms.
- *
- * @global moodle_database $DB
- * @param stdClass $usernew An object that contains some information about the user being updated
- * @param moodleform $userform The form that was submitted to edit the form
- * @param array $filemanageroptions
- * @return bool True if the user was updated, false if it stayed the same.
+ * @deprecated since Moodle 3.2
+ * @see core_user::update_picture()
  */
-function useredit_update_picture(stdClass $usernew, moodleform $userform, $filemanageroptions = array()) {
-    global $CFG, $DB;
-    require_once("$CFG->libdir/gdlib.php");
-
-    $context = context_user::instance($usernew->id, MUST_EXIST);
-    $user = $DB->get_record('user', array('id' => $usernew->id), 'id, picture', MUST_EXIST);
-
-    $newpicture = $user->picture;
-    // Get file_storage to process files.
-    $fs = get_file_storage();
-    if (!empty($usernew->deletepicture)) {
-        // The user has chosen to delete the selected users picture.
-        $fs->delete_area_files($context->id, 'user', 'icon'); // Drop all images in area.
-        $newpicture = 0;
-
-    } else {
-        // Save newly uploaded file, this will avoid context mismatch for newly created users.
-        file_save_draft_area_files($usernew->imagefile, $context->id, 'user', 'newicon', 0, $filemanageroptions);
-        if (($iconfiles = $fs->get_area_files($context->id, 'user', 'newicon')) && count($iconfiles) == 2) {
-            // Get file which was uploaded in draft area.
-            foreach ($iconfiles as $file) {
-                if (!$file->is_directory()) {
-                    break;
-                }
-            }
-            // Copy file to temporary location and the send it for processing icon.
-            if ($iconfile = $file->copy_content_to_temp()) {
-                // There is a new image that has been uploaded.
-                // Process the new image and set the user to make use of it.
-                // NOTE: Uploaded images always take over Gravatar.
-                $newpicture = (int)process_new_icon($context, 'user', 'icon', 0, $iconfile);
-                // Delete temporary file.
-                @unlink($iconfile);
-                // Remove uploaded file.
-                $fs->delete_area_files($context->id, 'user', 'newicon');
-            } else {
-                // Something went wrong while creating temp file.
-                // Remove uploaded file.
-                $fs->delete_area_files($context->id, 'user', 'newicon');
-                return false;
-            }
-        }
-    }
-
-    if ($newpicture != $user->picture) {
-        $DB->set_field('user', 'picture', $newpicture, array('id' => $user->id));
-        return true;
-    } else {
-        return false;
-    }
+function useredit_update_picture() {
+    throw new coding_exception('useredit_update_picture() can not be used anymore. Please use ' .
+        'core_user::update_picture() instead.');
 }
 
 /**
@@ -264,9 +236,8 @@ function useredit_update_trackforums($user, $usernew) {
  * @param array $interests
  */
 function useredit_update_interests($user, $interests) {
-    global $CFG;
-    require_once($CFG->dirroot . '/tag/lib.php');
-    tag_set('user', $user->id, $interests, 'core', context_user::instance($user->id)->id);
+    core_tag_tag::set_item_tags('core', 'user', $user->id,
+            context_user::instance($user->id), $interests);
 }
 
 /**
@@ -285,18 +256,26 @@ function useredit_shared_definition(&$mform, $editoroptions, $filemanageroptions
     }
 
     $strrequired = get_string('required');
+    $stringman = get_string_manager();
 
     // Add the necessary names.
     foreach (useredit_get_required_name_fields() as $fullname) {
-        $mform->addElement('text', $fullname,  get_string($fullname),  'maxlength="100" size="30"');
-        $mform->addRule($fullname, $strrequired, 'required', null, 'client');
+        $purpose = user_edit_map_field_purpose($user->id, $fullname);
+        $mform->addElement('text', $fullname,  get_string($fullname),  'maxlength="100" size="30"' . $purpose);
+        if ($stringman->string_exists('missing'.$fullname, 'core')) {
+            $strmissingfield = get_string('missing'.$fullname, 'core');
+        } else {
+            $strmissingfield = $strrequired;
+        }
+        $mform->addRule($fullname, $strmissingfield, 'required', null, 'client');
         $mform->setType($fullname, PARAM_NOTAGS);
     }
 
     $enabledusernamefields = useredit_get_enabled_name_fields();
     // Add the enabled additional name fields.
     foreach ($enabledusernamefields as $addname) {
-        $mform->addElement('text', $addname,  get_string($addname), 'maxlength="100" size="30"');
+        $purpose = user_edit_map_field_purpose($user->id, $addname);
+        $mform->addElement('text', $addname,  get_string($addname), 'maxlength="100" size="30"' . $purpose);
         $mform->setType($addname, PARAM_NOTAGS);
     }
 
@@ -307,7 +286,8 @@ function useredit_shared_definition(&$mform, $editoroptions, $filemanageroptions
                 . get_string('emailchangecancel', 'auth') . '</a>';
         $mform->addElement('static', 'emailpending', get_string('email'), $notice);
     } else {
-        $mform->addElement('text', 'email', get_string('email'), 'maxlength="100" size="30"');
+        $purpose = user_edit_map_field_purpose($user->id, 'email');
+        $mform->addElement('text', 'email', get_string('email'), 'maxlength="100" size="30"' . $purpose);
         $mform->addRule('email', $strrequired, 'required', null, 'client');
         $mform->setType('email', PARAM_RAW_TRIMMED);
     }
@@ -317,7 +297,12 @@ function useredit_shared_definition(&$mform, $editoroptions, $filemanageroptions
     $choices['1'] = get_string('emaildisplayyes');
     $choices['2'] = get_string('emaildisplaycourse');
     $mform->addElement('select', 'maildisplay', get_string('emaildisplay'), $choices);
-    $mform->setDefault('maildisplay', $CFG->defaultpreference_maildisplay);
+    $mform->setDefault('maildisplay', core_user::get_property_default('maildisplay'));
+    $mform->addHelpButton('maildisplay', 'emaildisplay');
+
+    $mform->addElement('text', 'moodlenetprofile', get_string('moodlenetprofile', 'user'));
+    $mform->setType('moodlenetprofile', PARAM_NOTAGS);
+    $mform->addHelpButton('moodlenetprofile', 'moodlenetprofile', 'user');
 
     $mform->addElement('text', 'city', get_string('city'), 'maxlength="120" size="21"');
     $mform->setType('city', PARAM_TEXT);
@@ -325,29 +310,30 @@ function useredit_shared_definition(&$mform, $editoroptions, $filemanageroptions
         $mform->setDefault('city', $CFG->defaultcity);
     }
 
+    $purpose = user_edit_map_field_purpose($user->id, 'country');
     $choices = get_string_manager()->get_list_of_countries();
     $choices = array('' => get_string('selectacountry') . '...') + $choices;
-    $mform->addElement('select', 'country', get_string('selectacountry'), $choices);
+    $mform->addElement('select', 'country', get_string('selectacountry'), $choices, $purpose);
     if (!empty($CFG->country)) {
-        $mform->setDefault('country', $CFG->country);
+        $mform->setDefault('country', core_user::get_property_default('country'));
     }
 
     if (isset($CFG->forcetimezone) and $CFG->forcetimezone != 99) {
         $choices = core_date::get_list_of_timezones($CFG->forcetimezone);
         $mform->addElement('static', 'forcedtimezone', get_string('timezone'), $choices[$CFG->forcetimezone]);
         $mform->addElement('hidden', 'timezone');
-        $mform->setType('timezone', PARAM_TIMEZONE);
+        $mform->setType('timezone', core_user::get_property_type('timezone'));
     } else {
         $choices = core_date::get_list_of_timezones($user->timezone, true);
         $mform->addElement('select', 'timezone', get_string('timezone'), $choices);
     }
 
-    // Multi-Calendar Support - see MDL-18375.
-    $calendartypes = \core_calendar\type_factory::get_list_of_calendar_types();
-    // We do not want to show this option unless there is more than one calendar type to display.
-    if (count($calendartypes) > 1) {
-        $mform->addElement('select', 'calendartype', get_string('preferredcalendar', 'calendar'), $calendartypes);
-        $mform->setDefault('calendartype', $CFG->calendartype);
+    if ($user->id < 0) {
+        $purpose = user_edit_map_field_purpose($user->id, 'lang');
+        $translations = get_string_manager()->get_list_of_translations();
+        $mform->addElement('select', 'lang', get_string('preferredlanguage'), $translations, $purpose);
+        $lang = empty($user->lang) ? $CFG->lang : $user->lang;
+        $mform->setDefault('lang', $lang);
     }
 
     if (!empty($CFG->allowuserthemes)) {
@@ -363,7 +349,7 @@ function useredit_shared_definition(&$mform, $editoroptions, $filemanageroptions
     }
 
     $mform->addElement('editor', 'description_editor', get_string('userdescription'), null, $editoroptions);
-    $mform->setType('description_editor', PARAM_CLEANHTML);
+    $mform->setType('description_editor', PARAM_RAW);
     $mform->addHelpButton('description_editor', 'userdescription');
 
     if (empty($USER->newadminuser)) {
@@ -376,7 +362,7 @@ function useredit_shared_definition(&$mform, $editoroptions, $filemanageroptions
 
         $mform->addElement('static', 'currentpicture', get_string('currentpicture'));
 
-        $mform->addElement('checkbox', 'deletepicture', get_string('delete'));
+        $mform->addElement('checkbox', 'deletepicture', get_string('deletepicture'));
         $mform->setDefault('deletepicture', 0);
 
         $mform->addElement('filemanager', 'imagefile', get_string('newpicture'), '', $filemanageroptions);
@@ -392,55 +378,41 @@ function useredit_shared_definition(&$mform, $editoroptions, $filemanageroptions
     if (count($disabledusernamefields) > 0) {
         $mform->addElement('header', 'moodle_additional_names', get_string('additionalnames'));
         foreach ($disabledusernamefields as $allname) {
-            $mform->addElement('text', $allname, get_string($allname), 'maxlength="100" size="30"');
+            $purpose = user_edit_map_field_purpose($user->id, $allname);
+            $mform->addElement('text', $allname, get_string($allname), 'maxlength="100" size="30"' . $purpose);
             $mform->setType($allname, PARAM_NOTAGS);
         }
     }
 
-    if (!empty($CFG->usetags) and empty($USER->newadminuser)) {
+    if (core_tag_tag::is_enabled('core', 'user') and empty($USER->newadminuser)) {
         $mform->addElement('header', 'moodle_interests', get_string('interests'));
-        $mform->addElement('tags', 'interests', get_string('interestslist'), array('display' => 'noofficial'));
+        $mform->addElement('tags', 'interests', get_string('interestslist'),
+            array('itemtype' => 'user', 'component' => 'core'));
         $mform->addHelpButton('interests', 'interestslist');
     }
 
     // Moodle optional fields.
     $mform->addElement('header', 'moodle_optional', get_string('optional', 'form'));
 
-    $mform->addElement('text', 'url', get_string('webpage'), 'maxlength="255" size="50"');
-    $mform->setType('url', PARAM_URL);
-
-    $mform->addElement('text', 'icq', get_string('icqnumber'), 'maxlength="15" size="25"');
-    $mform->setType('icq', PARAM_NOTAGS);
-
-    $mform->addElement('text', 'skype', get_string('skypeid'), 'maxlength="50" size="25"');
-    $mform->setType('skype', PARAM_NOTAGS);
-
-    $mform->addElement('text', 'aim', get_string('aimid'), 'maxlength="50" size="25"');
-    $mform->setType('aim', PARAM_NOTAGS);
-
-    $mform->addElement('text', 'yahoo', get_string('yahooid'), 'maxlength="50" size="25"');
-    $mform->setType('yahoo', PARAM_NOTAGS);
-
-    $mform->addElement('text', 'msn', get_string('msnid'), 'maxlength="50" size="25"');
-    $mform->setType('msn', PARAM_NOTAGS);
-
     $mform->addElement('text', 'idnumber', get_string('idnumber'), 'maxlength="255" size="25"');
-    $mform->setType('idnumber', PARAM_NOTAGS);
+    $mform->setType('idnumber', core_user::get_property_type('idnumber'));
 
     $mform->addElement('text', 'institution', get_string('institution'), 'maxlength="255" size="25"');
-    $mform->setType('institution', PARAM_TEXT);
+    $mform->setType('institution', core_user::get_property_type('institution'));
 
     $mform->addElement('text', 'department', get_string('department'), 'maxlength="255" size="25"');
-    $mform->setType('department', PARAM_TEXT);
+    $mform->setType('department', core_user::get_property_type('department'));
 
     $mform->addElement('text', 'phone1', get_string('phone1'), 'maxlength="20" size="25"');
-    $mform->setType('phone1', PARAM_NOTAGS);
+    $mform->setType('phone1', core_user::get_property_type('phone1'));
+    $mform->setForceLtr('phone1');
 
     $mform->addElement('text', 'phone2', get_string('phone2'), 'maxlength="20" size="25"');
-    $mform->setType('phone2', PARAM_NOTAGS);
+    $mform->setType('phone2', core_user::get_property_type('phone2'));
+    $mform->setForceLtr('phone2');
 
     $mform->addElement('text', 'address', get_string('address'), 'maxlength="255" size="25"');
-    $mform->setType('address', PARAM_TEXT);
+    $mform->setType('address', core_user::get_property_type('address'));
 }
 
 /**
@@ -485,7 +457,7 @@ function useredit_get_enabled_name_fields() {
     global $CFG;
 
     // Get all of the other name fields which are not ranked as necessary.
-    $additionalusernamefields = array_diff(get_all_user_name_fields(), array('firstname', 'lastname'));
+    $additionalusernamefields = array_diff(\core_user\fields::get_name_fields(), array('firstname', 'lastname'));
     // Find out which additional name fields are actually being used from the fullnamedisplay setting.
     $enabledadditionalusernames = array();
     foreach ($additionalusernamefields as $enabledname) {
@@ -512,7 +484,14 @@ function useredit_get_disabled_name_fields($enabledadditionalusernames = null) {
     }
 
     // These are the additional fields that are not currently enabled.
-    $nonusednamefields = array_diff(get_all_user_name_fields(),
+    $nonusednamefields = array_diff(\core_user\fields::get_name_fields(),
             array_merge(array('firstname', 'lastname'), $enabledadditionalusernames));
-    return $nonusednamefields;
+
+    // It may not be significant anywhere, but for compatibility, this used to return an array
+    // with keys and values the same.
+    $result = [];
+    foreach ($nonusednamefields as $field) {
+        $result[$field] = $field;
+    }
+    return $result;
 }

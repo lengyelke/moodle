@@ -140,7 +140,8 @@ class tablelog extends \table_sql implements \renderable {
      * Setup the headers for the html table.
      */
     protected function define_table_columns() {
-        $extrafields = get_extra_user_fields($this->context);
+        // TODO Does not support custom user profile fields (MDL-70456).
+        $extrafields = \core_user\fields::get_identity_fields($this->context, false);
 
         // Define headers and columns.
         $cols = array(
@@ -314,7 +315,20 @@ class tablelog extends \table_sql implements \renderable {
         if ($this->is_downloading()) {
             return $history->feedback;
         } else {
-            return format_text($history->feedback, $history->feedbackformat, array('context' => $this->context));
+            // We need the activity context, not the course context.
+            $gradeitem = $this->gradeitems[$history->itemid];
+            $context = $gradeitem->get_context();
+
+            $feedback = file_rewrite_pluginfile_urls(
+                $history->feedback,
+                'pluginfile.php',
+                $context->id,
+                GRADE_FILE_COMPONENT,
+                GRADE_HISTORY_FEEDBACK_FILEAREA,
+                $history->id
+            );
+
+            return format_text($feedback, $history->feedbackformat, array('context' => $context));
         }
     }
 
@@ -324,7 +338,7 @@ class tablelog extends \table_sql implements \renderable {
      * @return array containing sql to use and an array of params.
      */
     protected function get_filters_sql_and_params() {
-        global $DB;
+        global $DB, $USER;
 
         $coursecontext = $this->context;
         $filter = 'gi.courseid = :courseid';
@@ -355,6 +369,16 @@ class tablelog extends \table_sql implements \renderable {
             $params += array('grader' => $this->filters->grader);
         }
 
+        // If the course is separate group mode and the current user is not allowed to see all groups make sure
+        // that we display only users from the same groups as current user.
+        $groupmode = get_course($coursecontext->instanceid)->groupmode;
+        if ($groupmode == SEPARATEGROUPS && !has_capability('moodle/site:accessallgroups', $coursecontext)) {
+            $groupids = array_column(groups_get_all_groups($coursecontext->instanceid, $USER->id, 0, 'g.id'), 'id');
+            list($gsql, $gparams) = $DB->get_in_or_equal($groupids, SQL_PARAMS_NAMED, 'gmuparam', true, 0);
+            $filter .= " AND EXISTS (SELECT 1 FROM {groups_members} gmu WHERE gmu.userid=ggh.userid AND gmu.groupid $gsql)";
+            $params += $gparams;
+        }
+
         return array($filter, $params);
     }
 
@@ -371,17 +395,19 @@ class tablelog extends \table_sql implements \renderable {
                    gi.itemtype, gi.itemmodule, gi.iteminstance, gi.itemnumber, ';
 
         // Add extra user fields that we need for the graded user.
-        $extrafields = get_extra_user_fields($this->context);
+        // TODO Does not support custom user profile fields (MDL-70456).
+        $extrafields = \core_user\fields::get_identity_fields($this->context, false);
         foreach ($extrafields as $field) {
             $fields .= 'u.' . $field . ', ';
         }
-        $gradeduserfields = get_all_user_name_fields(true, 'u');
+        $userfieldsapi = \core_user\fields::for_name();
+        $gradeduserfields = $userfieldsapi->get_sql('u', false, '', '', false)->selects;
         $fields .= $gradeduserfields . ', ';
         $groupby = $fields;
 
         // Add extra user fields that we need for the grader user.
-        $fields .= get_all_user_name_fields(true, 'ug', '', 'grader');
-        $groupby .= get_all_user_name_fields(true, 'ug');
+        $fields .= $userfieldsapi->get_sql('ug', false, 'grader', '', false)->selects;
+        $groupby .= $userfieldsapi->get_sql('ug', false, '', '', false)->selects;
 
         // Filtering on revised grades only.
         $revisedonly = !empty($this->filters->revisedonly);

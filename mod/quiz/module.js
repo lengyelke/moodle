@@ -37,7 +37,7 @@ M.mod_quiz.init_review_form = function(Y) {
 
 M.mod_quiz.init_comment_popup = function(Y) {
     // Add a close button to the window.
-    var closebutton = Y.Node.create('<input type="button" />');
+    var closebutton = Y.Node.create('<input type="button" class="btn btn-secondary" />');
     closebutton.set('value', M.util.get_string('cancel', 'moodle'));
     Y.one('#id_submitbutton').ancestor().append(closebutton);
     Y.on('click', function() { window.close() }, closebutton);
@@ -58,6 +58,9 @@ M.mod_quiz.timer = {
     // so we can cancel.
     timeoutid: null,
 
+    // Threshold for updating time remaining, in milliseconds.
+    threshold: 3000,
+
     /**
      * @param Y the YUI object
      * @param start, the timer starting time, in seconds.
@@ -68,7 +71,7 @@ M.mod_quiz.timer = {
         M.mod_quiz.timer.endtime = M.pageloadstarttime.getTime() + start*1000;
         M.mod_quiz.timer.preview = preview;
         M.mod_quiz.timer.update();
-        Y.one('#quiz-timer').setStyle('display', 'block');
+        Y.one('#quiz-timer-wrapper').setStyle('display', 'flex');
     },
 
     /**
@@ -130,6 +133,18 @@ M.mod_quiz.timer = {
 
         // Arrange for this method to be called again soon.
         M.mod_quiz.timer.timeoutid = setTimeout(M.mod_quiz.timer.update, 100);
+    },
+
+    // Allow the end time of the quiz to be updated.
+    updateEndTime: function(timeleft) {
+        var newtimeleft = new Date().getTime() + timeleft * 1000;
+
+        // Only update if change is greater than the threshold, so the
+        // time doesn't bounce around unnecessarily.
+        if (Math.abs(newtimeleft - M.mod_quiz.timer.endtime) > M.mod_quiz.timer.threshold) {
+            M.mod_quiz.timer.endtime = newtimeleft;
+            M.mod_quiz.timer.update();
+        }
     }
 };
 
@@ -154,25 +169,12 @@ M.mod_quiz.nav.init = function(Y) {
 
     var form = Y.one('#responseform');
     if (form) {
-        function find_enabled_submit() {
-            // This is rather inelegant, but the CSS3 selector
-            //     return form.one('input[type=submit]:enabled');
-            // does not work in IE7, 8 or 9 for me.
-            var enabledsubmit = null;
-            form.all('input[type=submit]').each(function(submit) {
-                if (!enabledsubmit && !submit.get('disabled')) {
-                    enabledsubmit = submit;
-                }
-            });
-            return enabledsubmit;
-        }
-
         function nav_to_page(pageno) {
             Y.one('#followingpage').set('value', pageno);
 
             // Automatically submit the form. We do it this strange way because just
             // calling form.submit() does not run the form's submit event handlers.
-            var submit = find_enabled_submit();
+            var submit = form.one('input[name="next"]');
             submit.set('name', '');
             submit.getDOMNode().click();
         };
@@ -192,9 +194,9 @@ M.mod_quiz.nav.init = function(Y) {
                 pageno = 0;
             }
 
-            var questionidmatch = this.get('href').match(/#q(\d+)/);
+            var questionidmatch = this.get('href').match(/#question-(\d+)-(\d+)/);
             if (questionidmatch) {
-                form.set('action', form.get('action') + '#q' + questionidmatch[1]);
+                form.set('action', form.get('action') + questionidmatch[0]);
             }
 
             nav_to_page(pageno);
@@ -270,23 +272,6 @@ M.mod_quiz.secure_window = {
             return;
         }
         e.halt();
-    },
-
-    /**
-     * Event handler for the quiz start attempt button.
-     */
-    start_attempt_action: function(e, args) {
-        if (args.startattemptwarning == '') {
-            openpopup(e, args);
-        } else {
-            M.util.show_confirm_dialog(e, {
-                message: args.startattemptwarning,
-                callback: function() {
-                    openpopup(e, args);
-                },
-                continuelabel: M.util.get_string('startattempt', 'quiz')
-            });
-        }
     },
 
     init_close_button: function(Y, url) {

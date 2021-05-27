@@ -56,14 +56,14 @@ abstract class advanced_testcase extends base_testcase {
 
         $this->setBackupGlobals(false);
         $this->setBackupStaticAttributes(false);
-        $this->setRunTestInSeparateProcess(false);
+        $this->setPreserveGlobalState(false);
     }
 
     /**
      * Runs the bare test sequence.
      * @return void
      */
-    final public function runBare() {
+    final public function runBare(): void {
         global $DB;
 
         if (phpunit_util::$lastdbwrites != $DB->perf_get_writes()) {
@@ -82,13 +82,20 @@ abstract class advanced_testcase extends base_testcase {
             $DB = phpunit_util::get_global_backup('DB');
 
             // Deal with any debugging messages.
-            $debugerror = phpunit_util::display_debugging_messages();
+            $debugerror = phpunit_util::display_debugging_messages(true);
             $this->resetDebugging();
-            if ($debugerror) {
-                trigger_error('Unexpected debugging() call detected.', E_USER_NOTICE);
+            if (!empty($debugerror)) {
+                trigger_error('Unexpected debugging() call detected.'."\n".$debugerror, E_USER_NOTICE);
             }
 
-        } catch (Exception $e) {
+        } catch (Exception $ex) {
+            $e = $ex;
+        } catch (Throwable $ex) {
+            // Engine errors in PHP7 throw exceptions of type Throwable (this "catch" will be ignored in PHP5).
+            $e = $ex;
+        }
+
+        if (isset($e)) {
             // cleanup after failed expectation
             self::resetAllData();
             throw $e;
@@ -125,99 +132,133 @@ abstract class advanced_testcase extends base_testcase {
             self::resetAllData(true);
         }
 
+        // Reset context cache.
+        context_helper::reset_caches();
+
         // make sure test did not forget to close transaction
         if ($DB->is_transaction_started()) {
             self::resetAllData();
-            if ($this->getStatus() == PHPUnit_Runner_BaseTestRunner::STATUS_PASSED
-                or $this->getStatus() == PHPUnit_Runner_BaseTestRunner::STATUS_SKIPPED
-                or $this->getStatus() == PHPUnit_Runner_BaseTestRunner::STATUS_INCOMPLETE) {
+            if ($this->getStatus() == PHPUnit\Runner\BaseTestRunner::STATUS_PASSED
+                or $this->getStatus() == PHPUnit\Runner\BaseTestRunner::STATUS_SKIPPED
+                or $this->getStatus() == PHPUnit\Runner\BaseTestRunner::STATUS_INCOMPLETE) {
                 throw new coding_exception('Test '.$this->getName().' did not close database transaction');
             }
         }
     }
 
     /**
-     * Creates a new FlatXmlDataSet with the given $xmlFile. (absolute path.)
-     *
-     * @param string $xmlFile
-     * @return PHPUnit_Extensions_Database_DataSet_FlatXmlDataSet
-     */
-    protected function createFlatXMLDataSet($xmlFile) {
-        return new PHPUnit_Extensions_Database_DataSet_FlatXmlDataSet($xmlFile);
-    }
-
-    /**
      * Creates a new XMLDataSet with the given $xmlFile. (absolute path.)
      *
+     * @deprecated since Moodle 3.10 - See MDL-67673 and MDL-64600 for more info.
+     * @todo This will be removed for Moodle 4.2 as part of MDL-69882.
+     *
      * @param string $xmlFile
-     * @return PHPUnit_Extensions_Database_DataSet_XmlDataSet
+     * @return phpunit_dataset
      */
     protected function createXMLDataSet($xmlFile) {
-        return new PHPUnit_Extensions_Database_DataSet_XmlDataSet($xmlFile);
+        debugging(__FUNCTION__ . '() is deprecated. Please use dataset_from_files() instead.', DEBUG_DEVELOPER);
+        return $this->dataset_from_files([$xmlFile]);
     }
 
     /**
      * Creates a new CsvDataSet from the given array of csv files. (absolute paths.)
      *
+     * @deprecated since Moodle 3.10 - See MDL-67673 and MDL-64600 for more info.
+     * @todo This will be removed for Moodle 4.2 as part of MDL-69882.
+     *
      * @param array $files array tablename=>cvsfile
-     * @param string $delimiter
-     * @param string $enclosure
-     * @param string $escape
-     * @return PHPUnit_Extensions_Database_DataSet_CsvDataSet
+     * @param string $delimiter unused
+     * @param string $enclosure unused
+     * @param string $escape unused
+     * @return phpunit_dataset
      */
     protected function createCsvDataSet($files, $delimiter = ',', $enclosure = '"', $escape = '"') {
-        $dataSet = new PHPUnit_Extensions_Database_DataSet_CsvDataSet($delimiter, $enclosure, $escape);
-        foreach($files as $table=>$file) {
-            $dataSet->addTable($table, $file);
-        }
-        return $dataSet;
+        debugging(__FUNCTION__ . '() is deprecated. Please use dataset_from_files() instead.', DEBUG_DEVELOPER);
+        return $this->dataset_from_files($files);
     }
 
     /**
      * Creates new ArrayDataSet from given array
      *
+     * @deprecated since Moodle 3.10 - See MDL-67673 and MDL-64600 for more info.
+     * @todo This will be removed for Moodle 4.2 as part of MDL-69882.
+     *
      * @param array $data array of tables, first row in each table is columns
-     * @return phpunit_ArrayDataSet
+     * @return phpunit_dataset
      */
     protected function createArrayDataSet(array $data) {
-        return new phpunit_ArrayDataSet($data);
+        debugging(__FUNCTION__ . '() is deprecated. Please use dataset_from_array() instead.', DEBUG_DEVELOPER);
+        return $this->dataset_from_array($data);
     }
 
     /**
      * Load date into moodle database tables from standard PHPUnit data set.
      *
+     * @deprecated since Moodle 3.10 - See MDL-67673 and MDL-64600 for more info.
+     * @todo This will be removed for Moodle 4.2 as part of MDL-69882.
+     *
      * Note: it is usually better to use data generators
      *
-     * @param PHPUnit_Extensions_Database_DataSet_IDataSet $dataset
+     * @param phpunit_dataset $dataset
      * @return void
      */
-    protected function loadDataSet(PHPUnit_Extensions_Database_DataSet_IDataSet $dataset) {
-        global $DB;
+    protected function loadDataSet(phpunit_dataset $dataset) {
+        debugging(__FUNCTION__ . '() is deprecated. Please use dataset->to_database() instead.', DEBUG_DEVELOPER);
+        $dataset->to_database();
+    }
 
-        $structure = phpunit_util::get_tablestructure();
+    /**
+     * Creates a new dataset from CVS/XML files.
+     *
+     * This method accepts an array of full paths to CSV or XML files to be loaded
+     * into the dataset. For CSV files, the name of the table which the file belongs
+     * to needs to be specified. Example:
+     *
+     *   $fullpaths = [
+     *       '/path/to/users.xml',
+     *       'course' => '/path/to/courses.csv',
+     *   ];
+     *
+     * @since Moodle 3.10
+     *
+     * @param array $files full paths to CSV or XML files to load.
+     * @return phpunit_dataset
+     */
+    protected function dataset_from_files(array $files) {
+        // We ignore $delimiter, $enclosure and $escape, use the default ones in your fixtures.
+        $dataset = new phpunit_dataset();
+        $dataset->from_files($files);
+        return $dataset;
+    }
 
-        foreach($dataset->getTableNames() as $tablename) {
-            $table = $dataset->getTable($tablename);
-            $metadata = $dataset->getTableMetaData($tablename);
-            $columns = $metadata->getColumns();
+    /**
+     * Creates a new dataset from string (CSV or XML).
+     *
+     * @since Moodle 3.10
+     *
+     * @param string $content contents (CSV or XML) to load.
+     * @param string $type format of the content to be loaded (csv or xml).
+     * @param string $table name of the table which the file belongs to (only for CSV files).
+     * @return phpunit_dataset
+     */
+    protected function dataset_from_string(string $content, string $type, ?string $table = null) {
+        $dataset = new phpunit_dataset();
+        $dataset->from_string($content, $type, $table);
+        return $dataset;
+    }
 
-            $doimport = false;
-            if (isset($structure[$tablename]['id']) and $structure[$tablename]['id']->auto_increment) {
-                $doimport = in_array('id', $columns);
-            }
-
-            for($r=0; $r<$table->getRowCount(); $r++) {
-                $record = $table->getRow($r);
-                if ($doimport) {
-                    $DB->import_record($tablename, $record);
-                } else {
-                    $DB->insert_record($tablename, $record);
-                }
-            }
-            if ($doimport) {
-                $DB->get_manager()->reset_sequence(new xmldb_table($tablename));
-            }
-        }
+    /**
+     * Creates a new dataset from PHP array.
+     *
+     * @since Moodle 3.10
+     *
+     * @param array $data array of tables, see {@see phpunit_dataset::from_array()} for supported formats.
+     * @return phpunit_dataset
+     */
+    protected function dataset_from_array(array $data) {
+        $dataset = new phpunit_dataset();
+        $dataset->from_array($data);
+        return $dataset;
     }
 
     /**
@@ -273,6 +314,9 @@ abstract class advanced_testcase extends base_testcase {
      */
     public function assertDebuggingCalled($debugmessage = null, $debuglevel = null, $message = '') {
         $debugging = $this->getDebuggingMessages();
+        $debugdisplaymessage = "\n".phpunit_util::display_debugging_messages(true);
+        $this->resetDebugging();
+
         $count = count($debugging);
 
         if ($count == 0) {
@@ -283,12 +327,13 @@ abstract class advanced_testcase extends base_testcase {
         }
         if ($count > 1) {
             if ($message === '') {
-                $message = 'Expectation failed, debugging() triggered '.$count.' times.';
+                $message = 'Expectation failed, debugging() triggered '.$count.' times.'.$debugdisplaymessage;
             }
             $this->fail($message);
         }
         $this->assertEquals(1, $count);
 
+        $message .= $debugdisplaymessage;
         $debug = reset($debugging);
         if ($debugmessage !== null) {
             $this->assertSame($debugmessage, $debug->message, $message);
@@ -296,8 +341,45 @@ abstract class advanced_testcase extends base_testcase {
         if ($debuglevel !== null) {
             $this->assertSame($debuglevel, $debug->level, $message);
         }
+    }
 
+    /**
+     * Asserts how many times debugging has been called.
+     *
+     * @param int $expectedcount The expected number of times
+     * @param array $debugmessages Expected debugging messages, one for each expected message.
+     * @param array $debuglevels Expected debugging levels, one for each expected message.
+     * @param string $message
+     * @return void
+     */
+    public function assertDebuggingCalledCount($expectedcount, $debugmessages = array(), $debuglevels = array(), $message = '') {
+        if (!is_int($expectedcount)) {
+            throw new coding_exception('assertDebuggingCalledCount $expectedcount argument should be an integer.');
+        }
+
+        $debugging = $this->getDebuggingMessages();
+        $message .= "\n".phpunit_util::display_debugging_messages(true);
         $this->resetDebugging();
+
+        $this->assertEquals($expectedcount, count($debugging), $message);
+
+        if ($debugmessages) {
+            if (!is_array($debugmessages) || count($debugmessages) != $expectedcount) {
+                throw new coding_exception('assertDebuggingCalledCount $debugmessages should contain ' . $expectedcount . ' messages');
+            }
+            foreach ($debugmessages as $key => $debugmessage) {
+                $this->assertSame($debugmessage, $debugging[$key]->message, $message);
+            }
+        }
+
+        if ($debuglevels) {
+            if (!is_array($debuglevels) || count($debuglevels) != $expectedcount) {
+                throw new coding_exception('assertDebuggingCalledCount $debuglevels should contain ' . $expectedcount . ' messages');
+            }
+            foreach ($debuglevels as $key => $debuglevel) {
+                $this->assertSame($debuglevel, $debugging[$key]->level, $message);
+            }
+        }
     }
 
     /**
@@ -311,6 +393,8 @@ abstract class advanced_testcase extends base_testcase {
         if ($message === '') {
             $message = 'Expectation failed, debugging() was triggered.';
         }
+        $message .= "\n".phpunit_util::display_debugging_messages(true);
+        $this->resetDebugging();
         $this->assertEquals(0, $count, $message);
     }
 
@@ -438,19 +522,6 @@ abstract class advanced_testcase extends base_testcase {
     }
 
     /**
-     * Cleanup after all tests are executed.
-     *
-     * Note: do not forget to call this if overridden...
-     *
-     * @static
-     * @return void
-     */
-    public static function tearDownAfterClass() {
-        self::resetAllData();
-    }
-
-
-    /**
      * Reset all database tables, restore global state and clear caches and optionally purge dataroot dir.
      *
      * @param bool $detectchanges
@@ -484,6 +555,9 @@ abstract class advanced_testcase extends base_testcase {
         unset($user->description);
         unset($user->access);
         unset($user->preference);
+
+        // Enusre session is empty, as it may contain caches and user specific info.
+        \core\session\manager::init_empty_session();
 
         \core\session\manager::set_user($user);
     }
@@ -596,5 +670,76 @@ abstract class advanced_testcase extends base_testcase {
                 $this->$callback($filepath);
             }
         }
+    }
+
+    /**
+     * Wait for a second to roll over, ensures future calls to time() return a different result.
+     *
+     * This is implemented instead of sleep() as we do not need to wait a full second. In some cases
+     * due to calls we may wait more than sleep() would have, on average it will be less.
+     */
+    public function waitForSecond() {
+        $starttime = time();
+        while (time() == $starttime) {
+            usleep(50000);
+        }
+    }
+
+    /**
+     * Run adhoc tasks, optionally matching the specified classname.
+     *
+     * @param   string  $matchclass The name of the class to match on.
+     * @param   int     $matchuserid The userid to match.
+     */
+    protected function runAdhocTasks($matchclass = '', $matchuserid = null) {
+        global $CFG, $DB;
+        require_once($CFG->libdir.'/cronlib.php');
+
+        $params = [];
+        if (!empty($matchclass)) {
+            if (strpos($matchclass, '\\') !== 0) {
+                $matchclass = '\\' . $matchclass;
+            }
+            $params['classname'] = $matchclass;
+        }
+
+        if (!empty($matchuserid)) {
+            $params['userid'] = $matchuserid;
+        }
+
+        $lock = $this->createMock(\core\lock\lock::class);
+        $cronlock = $this->createMock(\core\lock\lock::class);
+
+        $tasks = $DB->get_recordset('task_adhoc', $params);
+        foreach ($tasks as $record) {
+            // Note: This is for cron only.
+            // We do not lock the tasks.
+            $task = \core\task\manager::adhoc_task_from_record($record);
+
+            $user = null;
+            if ($userid = $task->get_userid()) {
+                // This task has a userid specified.
+                $user = \core_user::get_user($userid);
+
+                // User found. Check that they are suitable.
+                \core_user::require_active_user($user, true, true);
+            }
+
+            $task->set_lock($lock);
+            if (!$task->is_blocking()) {
+                $cronlock->release();
+            } else {
+                $task->set_cron_lock($cronlock);
+            }
+
+            cron_prepare_core_renderer();
+            $this->setUser($user);
+
+            $task->execute();
+            \core\task\manager::adhoc_task_complete($task);
+
+            unset($task);
+        }
+        $tasks->close();
     }
 }

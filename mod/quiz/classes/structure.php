@@ -47,9 +47,6 @@ class structure {
      */
     protected $questions = array();
 
-    /** @var \stdClass[] quiz_slots.id => the quiz_slots rows for this quiz, agumented by sectionid. */
-    protected $slots = array();
-
     /** @var \stdClass[] quiz_slots.slot => the quiz_slots rows for this quiz, agumented by sectionid. */
     protected $slotsinorder = array();
 
@@ -61,6 +58,17 @@ class structure {
 
     /** @var bool caches the results of can_be_edited. */
     protected $canbeedited = null;
+
+    /** @var bool caches the results of can_add_random_question. */
+    protected $canaddrandom = null;
+
+    /** @var bool tracks whether tags have been loaded */
+    protected $hasloadedtags = false;
+
+    /**
+     * @var \stdClass[] the tags for slots. Indexed by slot id.
+     */
+    protected $slottags = array();
 
     /**
      * Create an instance of this class representing an empty quiz.
@@ -181,7 +189,7 @@ class structure {
             return false;
         }
 
-        if ($this->get_question_type_for_slot($slotnumber) == 'random') {
+        if (in_array($this->get_question_type_for_slot($slotnumber), array('random', 'missingtype'))) {
             return \question_engine::can_questions_finish_during_the_attempt(
                     $this->quizobj->get_quiz()->preferredbehaviour);
         }
@@ -190,14 +198,19 @@ class structure {
             return $this->slotsinorder[$slotnumber]->canfinish;
         }
 
-        $quba = \question_engine::make_questions_usage_by_activity('mod_quiz', $this->quizobj->get_context());
-        $tempslot = $quba->add_question(\question_bank::load_question(
-                $this->slotsinorder[$slotnumber]->questionid));
-        $quba->set_preferred_behaviour($this->quizobj->get_quiz()->preferredbehaviour);
-        $quba->start_all_questions();
+        try {
+            $quba = \question_engine::make_questions_usage_by_activity('mod_quiz', $this->quizobj->get_context());
+            $tempslot = $quba->add_question(\question_bank::load_question(
+                    $this->slotsinorder[$slotnumber]->questionid));
+            $quba->set_preferred_behaviour($this->quizobj->get_quiz()->preferredbehaviour);
+            $quba->start_all_questions();
 
-        $this->slotsinorder[$slotnumber]->canfinish = $quba->can_question_finish_during_attempt($tempslot);
-        return $this->slotsinorder[$slotnumber]->canfinish;
+            $this->slotsinorder[$slotnumber]->canfinish = $quba->can_question_finish_during_attempt($tempslot);
+            return $this->slotsinorder[$slotnumber]->canfinish;
+        } catch (\Exception $e) {
+            // If the question fails to start, this should not block editing.
+            return false;
+        }
     }
 
     /**
@@ -301,7 +314,7 @@ class structure {
      * @return \stdClass[] the slots in this quiz.
      */
     public function get_slots() {
-        return $this->slots;
+        return array_column($this->slotsinorder, null, 'id');
     }
 
     /**
@@ -396,12 +409,30 @@ class structure {
      * Get a slot by it's id. Throws an exception if it is missing.
      * @param int $slotid the slot id.
      * @return \stdClass the requested quiz_slots row.
+     * @throws \coding_exception
      */
     public function get_slot_by_id($slotid) {
-        if (!array_key_exists($slotid, $this->slots)) {
-            throw new \coding_exception('The \'slotid\' could not be found.');
+        foreach ($this->slotsinorder as $slot) {
+            if ($slot->id == $slotid) {
+                return $slot;
+            }
         }
-        return $this->slots[$slotid];
+
+        throw new \coding_exception('The \'slotid\' could not be found.');
+    }
+
+    /**
+     * Get a slot by it's slot number. Throws an exception if it is missing.
+     *
+     * @param int $slotnumber The slot number
+     * @return \stdClass
+     * @throws \coding_exception
+     */
+    public function get_slot_by_number($slotnumber) {
+        if (!array_key_exists($slotnumber, $this->slotsinorder)) {
+            throw new \coding_exception('The \'slotnumber\' could not be found.');
+        }
+        return $this->slotsinorder[$slotnumber];
     }
 
     /**
@@ -463,6 +494,14 @@ class structure {
      */
     public function get_section_by_id($sectionid) {
         return $this->sections[$sectionid];
+    }
+
+    /**
+     * Get the number of questions in the quiz.
+     * @return int the number of questions in the quiz.
+     */
+    public function get_section_count() {
+        return count($this->sections);
     }
 
     /**
@@ -579,7 +618,6 @@ class structure {
         $slots = $this->populate_missing_questions($slots);
 
         $this->questions = array();
-        $this->slots = array();
         $this->slotsinorder = array();
         foreach ($slots as $slotdata) {
             $this->questions[$slotdata->questionid] = $slotdata;
@@ -593,7 +631,6 @@ class structure {
             $slot->maxmark = $slotdata->maxmark;
             $slot->requireprevious = $slotdata->requireprevious;
 
-            $this->slots[$slot->id] = $slot;
             $this->slotsinorder[$slot->slot] = $slot;
         }
 
@@ -654,7 +691,7 @@ class structure {
      */
     protected function populate_question_numbers() {
         $number = 1;
-        foreach ($this->slots as $slot) {
+        foreach ($this->slotsinorder as $slot) {
             if ($this->questions[$slot->questionid]->length == 0) {
                 $slot->displayednumber = get_string('infoshort', 'quiz');
             } else {
@@ -682,7 +719,7 @@ class structure {
 
         $this->check_can_be_edited();
 
-        $movingslot = $this->slots[$idmove];
+        $movingslot = $this->get_slot_by_id($idmove);
         if (empty($movingslot)) {
             throw new \moodle_exception('Bad slot ID ' . $idmove);
         }
@@ -692,25 +729,31 @@ class structure {
         if (empty($idmoveafter)) {
             $moveafterslotnumber = 0;
         } else {
-            $moveafterslotnumber = (int) $this->slots[$idmoveafter]->slot;
+            $moveafterslotnumber = (int) $this->get_slot_by_id($idmoveafter)->slot;
+        }
+
+        // If the action came in as moving a slot to itself, normalise this to
+        // moving the slot to after the previous slot.
+        if ($moveafterslotnumber == $movingslotnumber) {
+            $moveafterslotnumber = $moveafterslotnumber - 1;
+        }
+
+        $followingslotnumber = $moveafterslotnumber + 1;
+        // Prevent checking against non-existance slot when already at the last slot.
+        if ($followingslotnumber == $movingslotnumber && !$this->is_last_slot_in_quiz($followingslotnumber)) {
+            $followingslotnumber += 1;
         }
 
         // Check the target page number is OK.
-        if ($page == 0) {
+        if ($page == 0 || $page === '') {
             $page = 1;
         }
         if (($moveafterslotnumber > 0 && $page < $this->get_page_number_for_slot($moveafterslotnumber)) ||
                 $page < 1) {
             throw new \coding_exception('The target page number is too small.');
         } else if (!$this->is_last_slot_in_quiz($moveafterslotnumber) &&
-                $page > $this->get_page_number_for_slot($moveafterslotnumber + 1)) {
+                $page > $this->get_page_number_for_slot($followingslotnumber)) {
             throw new \coding_exception('The target page number is too large.');
-        }
-
-        // If the action came in as moving a slot to itself, normalise this to
-        // moving the slot to after the previosu slot.
-        if ($moveafterslotnumber == $movingslotnumber) {
-            $moveafterslotnumber = $moveafterslotnumber - 1;
         }
 
         // Work out how things are being moved.
@@ -755,10 +798,12 @@ class structure {
                 $headingmoveafter = $movingslotnumber;
                 $headingmovebefore = $movingslotnumber + 2;
                 $headingmovedirection = -1;
-            } else {
+            } else if ($page < $movingslot->page) {
                 $headingmoveafter = $movingslotnumber - 1;
                 $headingmovebefore = $movingslotnumber + 1;
                 $headingmovedirection = 1;
+            } else {
+                return; // Nothing to do.
             }
         }
 
@@ -781,14 +826,8 @@ class structure {
         }
 
         // Update section fist slots.
-        $DB->execute("
-                UPDATE {quiz_sections}
-                   SET firstslot = firstslot + ?
-                 WHERE quizid = ?
-                   AND firstslot > ?
-                   AND firstslot < ?
-                ", array($headingmovedirection, $this->get_quizid(),
-                        $headingmoveafter, $headingmovebefore));
+        quiz_update_section_firstslots($this->get_quizid(), $headingmovedirection,
+                $headingmoveafter, $headingmovebefore);
 
         // If any pages are now empty, remove them.
         $emptypages = $DB->get_fieldset_sql("
@@ -864,14 +903,16 @@ class structure {
 
     /**
      * Remove a slot from a quiz
+     *
      * @param int $slotnumber The number of the slot to be deleted.
+     * @throws \coding_exception
      */
     public function remove_slot($slotnumber) {
         global $DB;
 
         $this->check_can_be_edited();
 
-        if ($this->is_only_slot_in_section($slotnumber)) {
+        if ($this->is_only_slot_in_section($slotnumber) && $this->get_section_count() > 1) {
             throw new \coding_exception('You cannot remove the last slot in a section.');
         }
 
@@ -882,10 +923,14 @@ class structure {
         $maxslot = $DB->get_field_sql('SELECT MAX(slot) FROM {quiz_slots} WHERE quizid = ?', array($this->get_quizid()));
 
         $trans = $DB->start_delegated_transaction();
+        $DB->delete_records('quiz_slot_tags', array('slotid' => $slot->id));
         $DB->delete_records('quiz_slots', array('id' => $slot->id));
         for ($i = $slot->slot + 1; $i <= $maxslot; $i++) {
             $DB->set_field('quiz_slots', 'slot', $i - 1,
                     array('quizid' => $this->get_quizid(), 'slot' => $i));
+            $this->slotsinorder[$i]->slot = $i - 1;
+            $this->slotsinorder[$i - 1] = $this->slotsinorder[$i];
+            unset($this->slotsinorder[$i]);
         }
 
         $qtype = $DB->get_field('question', 'qtype', array('id' => $slot->questionid));
@@ -894,12 +939,14 @@ class structure {
             question_delete_question($slot->questionid);
         }
 
-        $DB->execute("
-                UPDATE {quiz_sections}
-                   SET firstslot = firstslot - 1
-                 WHERE quizid = ?
-                   AND firstslot > ?
-                ", array($this->get_quizid(), $slotnumber));
+        quiz_update_section_firstslots($this->get_quizid(), -1, $slotnumber);
+        foreach ($this->sections as $key => $section) {
+            if ($section->firstslot > $slotnumber) {
+                $this->sections[$key]->firstslot--;
+            }
+        }
+        $this->populate_slots_with_sections();
+        $this->populate_question_numbers();
         unset($this->questions[$slot->questionid]);
 
         $this->refresh_page_numbers_and_update_db();
@@ -972,12 +1019,16 @@ class structure {
     /**
      * Add a section heading on a given page and return the sectionid
      * @param int $pagenumber the number of the page where the section heading begins.
-     * @param string $heading the heading to add.
+     * @param string|null $heading the heading to add. If not given, a default is used.
      */
-    public function add_section_heading($pagenumber, $heading = 'Section heading ...') {
+    public function add_section_heading($pagenumber, $heading = null) {
         global $DB;
         $section = new \stdClass();
-        $section->heading = $heading;
+        if ($heading !== null) {
+            $section->heading = $heading;
+        } else {
+            $section->heading = get_string('newsectionheading', 'quiz');
+        }
         $section->quizid = $this->get_quizid();
         $slotsonpage = $DB->get_records('quiz_slots', array('quizid' => $this->get_quizid(), 'page' => $pagenumber), 'slot DESC');
         $section->firstslot = end($slotsonpage)->slot;
@@ -1020,5 +1071,48 @@ class structure {
             throw new \coding_exception('Cannot remove the first section in a quiz.');
         }
         $DB->delete_records('quiz_sections', array('id' => $sectionid));
+    }
+
+    /**
+     * Set up this class with the slot tags for each of the slots.
+     */
+    protected function populate_slot_tags() {
+        $slotids = array_column($this->slotsinorder, 'id');
+        $this->slottags = quiz_retrieve_tags_for_slot_ids($slotids);
+    }
+
+    /**
+     * Retrieve the list of slot tags for the given slot id.
+     *
+     * @param  int $slotid The id for the slot
+     * @return \stdClass[] The list of slot tag records
+     */
+    public function get_slot_tags_for_slot_id($slotid) {
+        if (!$this->hasloadedtags) {
+            // Lazy load the tags just in case they are never required.
+            $this->populate_slot_tags();
+            $this->hasloadedtags = true;
+        }
+
+        return isset($this->slottags[$slotid]) ? $this->slottags[$slotid] : [];
+    }
+
+    /**
+     * Whether the current user can add random questions to the quiz or not.
+     * It is only possible to add a random question if the user has the moodle/question:useall capability
+     * on at least one of the contexts related to the one where we are currently editing questions.
+     *
+     * @return bool
+     */
+    public function can_add_random_questions() {
+        if ($this->canaddrandom === null) {
+            $quizcontext = $this->quizobj->get_context();
+            $relatedcontexts = new \question_edit_contexts($quizcontext);
+            $usablecontexts = $relatedcontexts->having_cap('moodle/question:useall');
+
+            $this->canaddrandom = !empty($usablecontexts);
+        }
+
+        return $this->canaddrandom;
     }
 }

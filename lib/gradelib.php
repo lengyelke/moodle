@@ -24,6 +24,8 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+global $CFG;
+
 /** Include essential files */
 require_once($CFG->libdir . '/grade/constants.php');
 
@@ -252,6 +254,7 @@ function grade_update($source, $courseid, $itemtype, $itemmodule, $iteminstance,
         $rawgrade       = false;
         $feedback       = false;
         $feedbackformat = FORMAT_MOODLE;
+        $feedbackfiles = [];
         $usermodified   = $USER->id;
         $datesubmitted  = null;
         $dategraded     = null;
@@ -268,6 +271,10 @@ function grade_update($source, $courseid, $itemtype, $itemmodule, $iteminstance,
             $feedbackformat = $grade['feedbackformat'];
         }
 
+        if (array_key_exists('feedbackfiles', $grade)) {
+            $feedbackfiles = $grade['feedbackfiles'];
+        }
+
         if (array_key_exists('usermodified', $grade)) {
             $usermodified = $grade['usermodified'];
         }
@@ -281,7 +288,8 @@ function grade_update($source, $courseid, $itemtype, $itemmodule, $iteminstance,
         }
 
         // update or insert the grade
-        if (!$grade_item->update_raw_grade($userid, $rawgrade, $source, $feedback, $feedbackformat, $usermodified, $dategraded, $datesubmitted, $grade_grade)) {
+        if (!$grade_item->update_raw_grade($userid, $rawgrade, $source, $feedback, $feedbackformat, $usermodified,
+                $dategraded, $datesubmitted, $grade_grade, $feedbackfiles)) {
             $failed = true;
         }
     }
@@ -323,6 +331,96 @@ function grade_update_outcomes($source, $courseid, $itemtype, $itemmodule, $item
         return $result;
     }
     return false; //grade items not found
+}
+
+/**
+ * Return true if the course needs regrading.
+ *
+ * @param int $courseid The course ID
+ * @return bool true if course grades need updating.
+ */
+function grade_needs_regrade_final_grades($courseid) {
+    $course_item = grade_item::fetch_course_item($courseid);
+    return $course_item->needsupdate;
+}
+
+/**
+ * Return true if the regrade process is likely to be time consuming and
+ * will therefore require the progress bar.
+ *
+ * @param int $courseid The course ID
+ * @return bool Whether the regrade process is likely to be time consuming
+ */
+function grade_needs_regrade_progress_bar($courseid) {
+    global $DB;
+    $grade_items = grade_item::fetch_all(array('courseid' => $courseid));
+
+    list($sql, $params) = $DB->get_in_or_equal(array_keys($grade_items), SQL_PARAMS_NAMED, 'gi');
+    $gradecount = $DB->count_records_select('grade_grades', 'itemid ' . $sql, $params);
+
+    // This figure may seem arbitrary, but after analysis it seems that 100 grade_grades can be calculated in ~= 0.5 seconds.
+    // Any longer than this and we want to show the progress bar.
+    return $gradecount > 100;
+}
+
+/**
+ * Check whether regarding of final grades is required and, if so, perform the regrade.
+ *
+ * If the regrade is expected to be time consuming (see grade_needs_regrade_progress_bar), then this
+ * function will output the progress bar, and redirect to the current PAGE->url after regrading
+ * completes. Otherwise the regrading will happen immediately and the page will be loaded as per
+ * normal.
+ *
+ * A callback may be specified, which is called if regrading has taken place.
+ * The callback may optionally return a URL which will be redirected to when the progress bar is present.
+ *
+ * @param stdClass $course The course to regrade
+ * @param callable $callback A function to call if regrading took place
+ * @return moodle_url The URL to redirect to if redirecting
+ */
+function grade_regrade_final_grades_if_required($course, callable $callback = null) {
+    global $PAGE, $OUTPUT;
+
+    if (!grade_needs_regrade_final_grades($course->id)) {
+        return false;
+    }
+
+    if (grade_needs_regrade_progress_bar($course->id)) {
+        $PAGE->set_heading($course->fullname);
+        echo $OUTPUT->header();
+        echo $OUTPUT->heading(get_string('recalculatinggrades', 'grades'));
+        $progress = new \core\progress\display(true);
+        $status = grade_regrade_final_grades($course->id, null, null, $progress);
+
+        // Show regrade errors and set the course to no longer needing regrade (stop endless loop).
+        if (is_array($status)) {
+            foreach ($status as $error) {
+                $errortext = new \core\output\notification($error, \core\output\notification::NOTIFY_ERROR);
+                echo $OUTPUT->render($errortext);
+            }
+            $courseitem = grade_item::fetch_course_item($course->id);
+            $courseitem->regrading_finished();
+        }
+
+        if ($callback) {
+            //
+            $url = call_user_func($callback);
+        }
+
+        if (empty($url)) {
+            $url = $PAGE->url;
+        }
+
+        echo $OUTPUT->continue_button($url);
+        echo $OUTPUT->footer();
+        die();
+    } else {
+        $result = grade_regrade_final_grades($course->id);
+        if ($callback) {
+            call_user_func($callback);
+        }
+        return $result;
+    }
 }
 
 /**
@@ -376,7 +474,7 @@ function grade_get_grades($courseid, $itemtype, $itemmodule, $iteminstance, $use
 
                 switch ($grade_item->gradetype) {
                     case GRADE_TYPE_NONE:
-                        continue;
+                        break;
 
                     case GRADE_TYPE_VALUE:
                         $item->scaleid = 0;
@@ -447,7 +545,17 @@ function grade_get_grades($courseid, $itemtype, $itemmodule, $iteminstance, $use
                         if (is_null($grade->feedback)) {
                             $grade->str_feedback = '';
                         } else {
-                            $grade->str_feedback = format_text($grade->feedback, $grade->feedbackformat);
+                            $feedback = file_rewrite_pluginfile_urls(
+                                $grade->feedback,
+                                'pluginfile.php',
+                                $grade_grades[$userid]->get_context()->id,
+                                GRADE_FILE_COMPONENT,
+                                GRADE_FEEDBACK_FILEAREA,
+                                $grade_grades[$userid]->id
+                            );
+
+                            $grade->str_feedback = format_text($feedback, $grade->feedbackformat,
+                                ['context' => $grade_grades[$userid]->get_context()]);
                         }
 
                         $item->grades[$userid] = $grade;
@@ -493,6 +601,8 @@ function grade_get_grades($courseid, $itemtype, $itemmodule, $iteminstance, $use
                         $grade->feedback       = $grade_grades[$userid]->feedback;
                         $grade->feedbackformat = $grade_grades[$userid]->feedbackformat;
                         $grade->usermodified   = $grade_grades[$userid]->usermodified;
+                        $grade->datesubmitted  = $grade_grades[$userid]->get_datesubmitted();
+                        $grade->dategraded     = $grade_grades[$userid]->get_dategraded();
 
                         // create text representation of grade
                         if (in_array($grade_item->id, $needsupdate)) {
@@ -566,16 +676,18 @@ function grade_get_grades($courseid, $itemtype, $itemmodule, $iteminstance, $use
 function grade_get_setting($courseid, $name, $default=null, $resetcache=false) {
     global $DB;
 
-    static $cache = array();
+    $cache = cache::make('core', 'gradesetting');
+    $gradesetting = $cache->get($courseid) ?: array();
 
-    if ($resetcache or !array_key_exists($courseid, $cache)) {
-        $cache[$courseid] = array();
+    if ($resetcache or empty($gradesetting)) {
+        $gradesetting = array();
+        $cache->set($courseid, $gradesetting);
 
     } else if (is_null($name)) {
         return null;
 
-    } else if (array_key_exists($name, $cache[$courseid])) {
-        return $cache[$courseid][$name];
+    } else if (array_key_exists($name, $gradesetting)) {
+        return $gradesetting[$name];
     }
 
     if (!$data = $DB->get_record('grade_settings', array('courseid'=>$courseid, 'name'=>$name))) {
@@ -588,7 +700,8 @@ function grade_get_setting($courseid, $name, $default=null, $resetcache=false) {
         $result = $default;
     }
 
-    $cache[$courseid][$name] = $result;
+    $gradesetting[$name] = $result;
+    $cache->set($courseid, $gradesetting);
     return $result;
 }
 
@@ -766,6 +879,7 @@ function grade_format_gradevalue_percentage($value, $grade_item, $decimals, $loc
  * @return string
  */
 function grade_format_gradevalue_letter($value, $grade_item) {
+    global $CFG;
     $context = context_course::instance($grade_item->courseid, IGNORE_MISSING);
     if (!$letters = grade_get_letters($context)) {
         return ''; // no letters??
@@ -777,7 +891,16 @@ function grade_format_gradevalue_letter($value, $grade_item) {
 
     $value = grade_grade::standardise_score($value, $grade_item->grademin, $grade_item->grademax, 0, 100);
     $value = bounded_number(0, $value, 100); // just in case
+
+    $gradebookcalculationsfreeze = 'gradebook_calculations_freeze_' . $grade_item->courseid;
+
     foreach ($letters as $boundary => $letter) {
+        if (property_exists($CFG, $gradebookcalculationsfreeze) && (int)$CFG->{$gradebookcalculationsfreeze} <= 20160518) {
+            // Do nothing.
+        } else {
+            // The boundary is a percentage out of 100 so use 0 as the min and 100 as the max.
+            $boundary = grade_grade::standardise_score($boundary, 0, 100, 0, 100);
+        }
         if ($value >= $boundary) {
             return format_string($letter);
         }
@@ -835,14 +958,11 @@ function grade_get_letters($context=null) {
         return array('93'=>'A', '90'=>'A-', '87'=>'B+', '83'=>'B', '80'=>'B-', '77'=>'C+', '73'=>'C', '70'=>'C-', '67'=>'D+', '60'=>'D', '0'=>'F');
     }
 
-    static $cache = array();
+    $cache = cache::make('core', 'grade_letters');
+    $data = $cache->get($context->id);
 
-    if (array_key_exists($context->id, $cache)) {
-        return $cache[$context->id];
-    }
-
-    if (count($cache) > 100) {
-        $cache = array(); // cache size limit
+    if (!empty($data)) {
+        return $data;
     }
 
     $letters = array();
@@ -858,13 +978,15 @@ function grade_get_letters($context=null) {
         }
 
         if (!empty($letters)) {
-            $cache[$context->id] = $letters;
+            // Cache the grade letters for this context.
+            $cache->set($context->id, $letters);
             return $letters;
         }
     }
 
     $letters = grade_get_letters(null);
-    $cache[$context->id] = $letters;
+    // Cache the grade letters for this context.
+    $cache->set($context->id, $letters);
     return $letters;
 }
 
@@ -1010,14 +1132,20 @@ function grade_recover_history_grades($userid, $courseid) {
  *
  * @param int $courseid The course ID
  * @param int $userid If specified try to do a quick regrading of the grades of this user only
- * @param object $updated_item Optional grade item to be marked for regrading
+ * @param object $updated_item Optional grade item to be marked for regrading. It is required if $userid is set.
+ * @param \core\progress\base $progress If provided, will be used to update progress on this long operation.
  * @return bool true if ok, array of errors if problems found. Grade item id => error message
  */
-function grade_regrade_final_grades($courseid, $userid=null, $updated_item=null) {
-    // This may take a very long time.
+function grade_regrade_final_grades($courseid, $userid=null, $updated_item=null, $progress=null) {
+    // This may take a very long time and extra memory.
     \core_php_time_limit::raise();
+    raise_memory_limit(MEMORY_EXTRA);
 
     $course_item = grade_item::fetch_course_item($courseid);
+
+    if ($progress == null) {
+        $progress = new \core\progress\none();
+    }
 
     if ($userid) {
         // one raw grade updated for one user
@@ -1055,25 +1183,30 @@ function grade_regrade_final_grades($courseid, $userid=null, $updated_item=null)
         }
     }
 
+    $progresstotal = 0;
+    $progresscurrent = 0;
+
     $grade_items = grade_item::fetch_all(array('courseid'=>$courseid));
     $depends_on = array();
 
-    // first mark all category and calculated items as needing regrading
-    // this is slower, but 100% accurate
     foreach ($grade_items as $gid=>$gitem) {
-        if (!empty($updated_item) and $updated_item->id == $gid) {
-            $grade_items[$gid]->needsupdate = 1;
-
-        } else if ($gitem->is_course_item() or $gitem->is_category_item() or $gitem->is_calculated()) {
+        if ((!empty($updated_item) and $updated_item->id == $gid) ||
+                $gitem->is_course_item() || $gitem->is_category_item() || $gitem->is_calculated()) {
             $grade_items[$gid]->needsupdate = 1;
         }
 
-        // construct depends_on lookup array
-        $depends_on[$gid] = $grade_items[$gid]->depends_on();
+        // We load all dependencies of these items later we can discard some grade_items based on this.
+        if ($grade_items[$gid]->needsupdate) {
+            $depends_on[$gid] = $grade_items[$gid]->depends_on();
+            $progresstotal++;
+        }
     }
+
+    $progress->start_progress('regrade_course', $progresstotal);
 
     $errors = array();
     $finalids = array();
+    $updatedids = array();
     $gids     = array_keys($grade_items);
     $failed = 0;
 
@@ -1088,29 +1221,77 @@ function grade_regrade_final_grades($courseid, $userid=null, $updated_item=null)
                 $finalids[] = $gid; // we can make it final - does not need update
                 continue;
             }
+            $thisprogress = $progresstotal;
+            foreach ($grade_items as $item) {
+                if ($item->needsupdate) {
+                    $thisprogress--;
+                }
+            }
+            // Clip between $progresscurrent and $progresstotal.
+            $thisprogress = max(min($thisprogress, $progresstotal), $progresscurrent);
+            $progress->progress($thisprogress);
+            $progresscurrent = $thisprogress;
 
-            $doupdate = true;
             foreach ($depends_on[$gid] as $did) {
                 if (!in_array($did, $finalids)) {
-                    $doupdate = false;
-                    continue; // this item depends on something that is not yet in finals array
+                    // This item depends on something that is not yet in finals array.
+                    continue 2;
                 }
             }
 
-            //oki - let's update, calculate or aggregate :-)
-            if ($doupdate) {
-                $result = $grade_items[$gid]->regrade_final_grades($userid);
+            // If this grade item has no dependancy with any updated item at all, then remove it from being recalculated.
 
-                if ($result === true) {
-                    $grade_items[$gid]->regrading_finished();
-                    $grade_items[$gid]->check_locktime(); // do the locktime item locking
+            // When we get here, all of this grade item's decendents are marked as final so they would be marked as updated too
+            // if they would have been regraded. We don't need to regrade items which dependants (not only the direct ones
+            // but any dependant in the cascade) have not been updated.
+
+            // If $updated_item was specified we discard the grade items that do not depend on it or on any grade item that
+            // depend on $updated_item.
+
+            // Here we check to see if the direct decendants are marked as updated.
+            if (!empty($updated_item) && $gid != $updated_item->id && !in_array($updated_item->id, $depends_on[$gid])) {
+
+                // We need to ensure that none of this item's dependencies have been updated.
+                // If we find that one of the direct decendants of this grade item is marked as updated then this
+                // grade item needs to be recalculated and marked as updated.
+                // Being marked as updated is done further down in the code.
+
+                $updateddependencies = false;
+                foreach ($depends_on[$gid] as $dependency) {
+                    if (in_array($dependency, $updatedids)) {
+                        $updateddependencies = true;
+                        break;
+                    }
+                }
+                if ($updateddependencies === false) {
+                    // If no direct descendants are marked as updated, then we don't need to update this grade item. We then mark it
+                    // as final.
                     $count++;
                     $finalids[] = $gid;
-
-                } else {
-                    $grade_items[$gid]->force_regrading();
-                    $errors[$gid] = $result;
+                    continue;
                 }
+            }
+
+            // Let's update, calculate or aggregate.
+            $result = $grade_items[$gid]->regrade_final_grades($userid);
+
+            if ($result === true) {
+
+                // We should only update the database if we regraded all users.
+                if (empty($userid)) {
+                    $grade_items[$gid]->regrading_finished();
+                    // Do the locktime item locking.
+                    $grade_items[$gid]->check_locktime();
+                } else {
+                    $grade_items[$gid]->needsupdate = 0;
+                }
+                $count++;
+                $finalids[] = $gid;
+                $updatedids[] = $gid;
+
+            } else {
+                $grade_items[$gid]->force_regrading();
+                $errors[$gid] = $result;
             }
         }
 
@@ -1131,6 +1312,7 @@ function grade_regrade_final_grades($courseid, $userid=null, $updated_item=null)
             break; // Found error.
         }
     }
+    $progress->end_progress();
 
     if (count($errors) == 0) {
         if (empty($userid)) {
@@ -1217,9 +1399,10 @@ function grade_update_mod_grades($modinstance, $userid=0) {
         //new grading supported, force updating of grades
         $updateitemfunc($modinstance);
         $updategradesfunc($modinstance, $userid);
-
-    } else {
+    } else if (function_exists($updategradesfunc) xor function_exists($updateitemfunc)) {
         // Module does not support grading?
+        debugging("You have declared one of $updateitemfunc and $updategradesfunc but not both. " .
+                  "This will cause broken behaviour.", DEBUG_DEVELOPER);
     }
 
     return true;
@@ -1236,10 +1419,22 @@ function remove_grade_letters($context, $showfeedback) {
 
     $strdeleted = get_string('deleted');
 
-    $DB->delete_records('grade_letters', array('contextid'=>$context->id));
+    $records = $DB->get_records('grade_letters', array('contextid' => $context->id));
+    foreach ($records as $record) {
+        $DB->delete_records('grade_letters', array('id' => $record->id));
+        // Trigger the letter grade deleted event.
+        $event = \core\event\grade_letter_deleted::create(array(
+            'objectid' => $record->id,
+            'context' => $context,
+        ));
+        $event->trigger();
+    }
     if ($showfeedback) {
         echo $OUTPUT->notification($strdeleted.' - '.get_string('letters', 'grades'), 'notifysuccess');
     }
+
+    $cache = cache::make('core', 'grade_letters');
+    $cache->delete($context->id);
 }
 
 /**
@@ -1299,7 +1494,16 @@ function grade_course_category_delete($categoryid, $newparentid, $showfeedback) 
     global $DB;
 
     $context = context_coursecat::instance($categoryid);
-    $DB->delete_records('grade_letters', array('contextid'=>$context->id));
+    $records = $DB->get_records('grade_letters', array('contextid' => $context->id));
+    foreach ($records as $record) {
+        $DB->delete_records('grade_letters', array('id' => $record->id));
+        // Trigger the letter grade deleted event.
+        $event = \core\event\grade_letter_deleted::create(array(
+            'objectid' => $record->id,
+            'context' => $context,
+        ));
+        $event->trigger();
+    }
 }
 
 /**
@@ -1350,58 +1554,6 @@ function grade_user_unenrol($courseid, $userid) {
                 foreach ($grades as $grade) {
                     $grade->delete('userdelete');
                 }
-            }
-        }
-    }
-}
-
-/**
- * Grading cron job. Performs background clean up on the gradebook
- */
-function grade_cron() {
-    global $CFG, $DB;
-
-    $now = time();
-
-    $sql = "SELECT i.*
-              FROM {grade_items} i
-             WHERE i.locked = 0 AND i.locktime > 0 AND i.locktime < ? AND EXISTS (
-                SELECT 'x' FROM {grade_items} c WHERE c.itemtype='course' AND c.needsupdate=0 AND c.courseid=i.courseid)";
-
-    // go through all courses that have proper final grades and lock them if needed
-    $rs = $DB->get_recordset_sql($sql, array($now));
-    foreach ($rs as $item) {
-        $grade_item = new grade_item($item, false);
-        $grade_item->locked = $now;
-        $grade_item->update('locktime');
-    }
-    $rs->close();
-
-    $grade_inst = new grade_grade();
-    $fields = 'g.'.implode(',g.', $grade_inst->required_fields);
-
-    $sql = "SELECT $fields
-              FROM {grade_grades} g, {grade_items} i
-             WHERE g.locked = 0 AND g.locktime > 0 AND g.locktime < ? AND g.itemid=i.id AND EXISTS (
-                SELECT 'x' FROM {grade_items} c WHERE c.itemtype='course' AND c.needsupdate=0 AND c.courseid=i.courseid)";
-
-    // go through all courses that have proper final grades and lock them if needed
-    $rs = $DB->get_recordset_sql($sql, array($now));
-    foreach ($rs as $grade) {
-        $grade_grade = new grade_grade($grade, false);
-        $grade_grade->locked = $now;
-        $grade_grade->update('locktime');
-    }
-    $rs->close();
-
-    //TODO: do not run this cleanup every cron invocation
-    // cleanup history tables
-    if (!empty($CFG->gradehistorylifetime)) {  // value in days
-        $histlifetime = $now - ($CFG->gradehistorylifetime * 3600 * 24);
-        $tables = array('grade_outcomes_history', 'grade_categories_history', 'grade_items_history', 'grade_grades_history', 'scale_history');
-        foreach ($tables as $table) {
-            if ($DB->delete_records_select($table, "timemodified < ?", array($histlifetime))) {
-                mtrace("    Deleted old grade history records from '$table'");
             }
         }
     }
@@ -1473,4 +1625,23 @@ function grade_floats_different($f1, $f2) {
  */
 function grade_floats_equal($f1, $f2) {
     return (grade_floatval($f1) === grade_floatval($f2));
+}
+
+/**
+ * Get the most appropriate grade date for a grade item given the user that the grade relates to.
+ *
+ * @param \stdClass $grade
+ * @param \stdClass $user
+ * @return int|null
+ */
+function grade_get_date_for_user_grade(\stdClass $grade, \stdClass $user): ?int {
+    // The `datesubmitted` is the time that the grade was created.
+    // The `dategraded` is the time that it was modified or overwritten.
+    // If the grade was last modified by the user themselves use the date graded.
+    // Otherwise use date submitted.
+    if ($grade->usermodified == $user->id || empty($grade->datesubmitted)) {
+        return $grade->dategraded;
+    } else {
+        return $grade->datesubmitted;
+    }
 }

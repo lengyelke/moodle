@@ -59,7 +59,7 @@
     $PAGE->set_title($strsurveysaved);
     $PAGE->set_heading($course->fullname);
     echo $OUTPUT->header();
-    echo $OUTPUT->heading($survey->name);
+    echo $OUTPUT->heading(format_string($survey->name));
 
     if (survey_already_done($survey->id, $USER->id)) {
         notice(get_string("alreadysubmitted", "survey"), get_local_referer(false));
@@ -67,14 +67,6 @@
     }
 
     survey_save_answers($survey, $formdata, $course, $context);
-
-    $params = array(
-        'context' => $context,
-        'courseid' => $course->id,
-        'other' => array('surveyid' => $survey->id)
-    );
-    $event = \mod_survey\event\response_submitted::create($params);
-    $event->trigger();
 
 // Print the page and finish up.
 

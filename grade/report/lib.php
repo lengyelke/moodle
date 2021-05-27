@@ -49,7 +49,8 @@ abstract class grade_report {
 
     /**
      * The context.
-     * @var int $context
+     *
+     * @var context $context
      */
     public $context;
 
@@ -366,16 +367,20 @@ abstract class grade_report {
     protected function setup_groups() {
         // find out current groups mode
         if ($this->groupmode = groups_get_course_groupmode($this->course)) {
-            $this->currentgroup = groups_get_course_group($this->course, true);
+            if (empty($this->gpr->groupid)) {
+                $this->currentgroup = groups_get_course_group($this->course, true);
+            } else {
+                $this->currentgroup = $this->gpr->groupid;
+            }
             $this->group_selector = groups_print_course_menu($this->course, $this->pbarurl, true);
 
             if ($this->groupmode == SEPARATEGROUPS and !$this->currentgroup and !has_capability('moodle/site:accessallgroups', $this->context)) {
                 $this->currentgroup = -2; // means can not access any groups at all
             }
-
             if ($this->currentgroup) {
-                $group = groups_get_group($this->currentgroup);
-                $this->currentgroupname     = $group->name;
+                if ($group = groups_get_group($this->currentgroup)) {
+                    $this->currentgroupname = $group->name;
+                }
                 $this->groupsql             = " JOIN {groups_members} gm ON gm.userid = u.id ";
                 $this->groupwheresql        = " AND gm.groupid = :gr_grpid ";
                 $this->groupwheresql_params = array('gr_grpid'=>$this->currentgroup);
@@ -389,15 +394,18 @@ abstract class grade_report {
     public function setup_users() {
         global $SESSION, $DB;
 
+        $filterfirstnamekey = "filterfirstname-{$this->context->id}";
+        $filtersurnamekey = "filtersurname-{$this->context->id}";
+
         $this->userwheresql = "";
         $this->userwheresql_params = array();
-        if (isset($SESSION->gradereport['filterfirstname']) && !empty($SESSION->gradereport['filterfirstname'])) {
+        if (!empty($SESSION->gradereport[$filterfirstnamekey])) {
             $this->userwheresql .= ' AND '.$DB->sql_like('u.firstname', ':firstname', false, false);
-            $this->userwheresql_params['firstname'] = $SESSION->gradereport['filterfirstname'].'%';
+            $this->userwheresql_params['firstname'] = $SESSION->gradereport[$filterfirstnamekey] . '%';
         }
-        if (isset($SESSION->gradereport['filtersurname']) && !empty($SESSION->gradereport['filtersurname'])) {
+        if (!empty($SESSION->gradereport[$filtersurnamekey])) {
             $this->userwheresql .= ' AND '.$DB->sql_like('u.lastname', ':lastname', false, false);
-            $this->userwheresql_params['lastname'] = $SESSION->gradereport['filtersurname'].'%';
+            $this->userwheresql_params['lastname'] = $SESSION->gradereport[$filtersurnamekey] . '%';
         }
     }
 
@@ -412,8 +420,8 @@ abstract class grade_report {
         $matrix = array('up' => 'desc', 'down' => 'asc', 'move' => 'desc');
         $strsort = $this->get_lang_string('sort' . $matrix[$direction]);
 
-        $arrow = $OUTPUT->pix_icon($pix[$direction], $strsort, '', array('class' => 'sorticon'));
-        return html_writer::link($sortlink, $arrow, array('title'=>$strsort));
+        $arrow = $OUTPUT->pix_icon($pix[$direction], '', '', ['class' => 'sorticon']);
+        return html_writer::link($sortlink, $arrow, ['title' => $strsort, 'aria-label' => $strsort]);
     }
 
     /**
@@ -525,14 +533,14 @@ abstract class grade_report {
                     $aggregationweight = null;
                 }
             }
-        } else if (!empty($hiding_affected['unknown'][$course_item->id])) {
+        } else if (array_key_exists($course_item->id, $hiding_affected['unknowngrades'])) {
             //not sure whether or not this item depends on a hidden item
             if (!$this->showtotalsifcontainhidden[$courseid]) {
                 //hide the grade
                 $finalgrade = null;
             } else {
                 //use reprocessed marks that exclude hidden items
-                $finalgrade = $hiding_affected['unknown'][$course_item->id];
+                $finalgrade = $hiding_affected['unknowngrades'][$course_item->id];
 
                 if (array_key_exists($course_item->id, $hiding_affected['alteredgrademin'])) {
                     $grademin = $hiding_affected['alteredgrademin'][$course_item->id];

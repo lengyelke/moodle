@@ -34,7 +34,7 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-require_once(dirname(__FILE__) . '/../config.php');
+require_once(__DIR__ . '/../config.php');
 require_once($CFG->dirroot . '/my/lib.php');
 
 redirect_if_major_upgrade_required();
@@ -62,14 +62,15 @@ if (isguestuser()) {  // Force them to see system default, no editing allowed
     $USER->editing = $edit = 0;  // Just in case
     $context = context_system::instance();
     $PAGE->set_blocks_editing_capability('moodle/my:configsyspages');  // unlikely :)
-    $header = "$SITE->shortname: $strmymoodle (GUEST)";
+    $strguest = get_string('guest');
+    $header = "$SITE->shortname: $strmymoodle ($strguest)";
     $pagetitle = $header;
 
 } else {        // We are trying to view or edit our own My Moodle page
     $userid = $USER->id;  // Owner of the page
     $context = context_user::instance($USER->id);
     $PAGE->set_blocks_editing_capability('moodle/my:manageblocks');
-    $header = fullname($USER);
+    $header = "$SITE->shortname: $strmymoodle";
     $pagetitle = $strmymoodle;
 }
 
@@ -163,6 +164,15 @@ if (empty($CFG->forcedefaultmymoodle) && $PAGE->user_allowed_editing()) {
 
 echo $OUTPUT->header();
 
+if (core_userfeedback::should_display_reminder()) {
+    core_userfeedback::print_reminder_block();
+}
+
 echo $OUTPUT->custom_block_region('content');
 
 echo $OUTPUT->footer();
+
+// Trigger dashboard has been viewed event.
+$eventparams = array('context' => $context);
+$event = \core\event\dashboard_viewed::create($eventparams);
+$event->trigger();

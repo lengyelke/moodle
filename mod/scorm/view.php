@@ -66,17 +66,23 @@ $contextmodule = context_module::instance($cm->id);
 
 $launch = false; // Does this automatically trigger a launch based on skipview.
 if (!empty($scorm->popup)) {
-    $orgidentifier = '';
-
     $scoid = 0;
     $orgidentifier = '';
-    if ($sco = scorm_get_sco($scorm->launch, SCO_ONLY)) {
+
+    $result = scorm_get_toc($USER, $scorm, $cm->id, TOCFULLURL);
+    // Set last incomplete sco to launch first.
+    if (!empty($result->sco->id)) {
+        $sco = $result->sco;
+    } else {
+        $sco = scorm_get_sco($scorm->launch, SCO_ONLY);
+    }
+    if (!empty($sco)) {
+        $scoid = $sco->id;
         if (($sco->organization == '') && ($sco->launch == '')) {
             $orgidentifier = $sco->identifier;
         } else {
             $orgidentifier = $sco->organization;
         }
-        $scoid = $sco->id;
     }
 
     if (empty($preventskip) && $scorm->skipview >= SCORM_SKIPVIEW_FIRST &&
@@ -133,6 +139,12 @@ $PAGE->set_heading($course->fullname);
 echo $OUTPUT->header();
 echo $OUTPUT->heading(format_string($scorm->name));
 
+// Display any activity information (eg completion requirements / dates).
+$cminfo = cm_info::create($cm);
+$completiondetails = \core_completion\cm_completion_details::get_instance($cminfo, $USER->id);
+$activitydates = \core\activity_dates::get_dates_for_module($cminfo, $USER->id);
+echo $OUTPUT->activity_information($cminfo, $completiondetails, $activitydates);
+
 if (!empty($action) && confirm_sesskey() && has_capability('mod/scorm:deleteownresponses', $contextmodule)) {
     if ($action == 'delete') {
         $confirmurl = new moodle_url($PAGE->url, array('action' => 'deleteconfirm'));
@@ -156,20 +168,17 @@ if (empty($launch) && ($scorm->displayattemptstatus == SCORM_DISPLAY_ATTEMPTSTAT
          $scorm->displayattemptstatus == SCORM_DISPLAY_ATTEMPTSTATUS_ENTRY)) {
     $attemptstatus = scorm_get_attempt_status($USER, $scorm, $cm);
 }
-echo $OUTPUT->box(format_module_intro('scorm', $scorm, $cm->id).$attemptstatus, 'generalbox boxaligncenter boxwidthwide', 'intro');
+echo $OUTPUT->box(format_module_intro('scorm', $scorm, $cm->id).$attemptstatus, 'container', 'intro');
 
-// Check if SCORM available.
+// Check if SCORM available. No need to display warnings because activity dates are displayed at the top of the page.
 list($available, $warnings) = scorm_get_availability_status($scorm);
-if (!$available) {
-    $reason = current(array_keys($warnings));
-    echo $OUTPUT->box(get_string($reason, "scorm", $warnings[$reason]), "generalbox boxaligncenter");
-}
 
 if ($available && empty($launch)) {
     scorm_print_launch($USER, $scorm, 'view.php?id='.$cm->id, $cm);
 }
 if (!empty($forcejs)) {
-    echo $OUTPUT->box(get_string("forcejavascriptmessage", "scorm"), "generalbox boxaligncenter forcejavascriptmessage");
+    $message = $OUTPUT->box(get_string("forcejavascriptmessage", "scorm"), "container forcejavascriptmessage");
+    echo html_writer::tag('noscript', $message);
 }
 
 if (!empty($scorm->popup)) {

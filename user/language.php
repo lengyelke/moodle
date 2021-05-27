@@ -46,7 +46,7 @@ if ($languageform->is_cancelled()) {
     $lang = $data->lang;
     // If the specified language does not exist, use the site default.
     if (!get_string_manager()->translation_exists($lang, false)) {
-        $lang = $CFG->lang;
+        $lang = core_user::get_property_default('lang');
     }
 
     $user->lang = $lang;
@@ -60,7 +60,7 @@ if ($languageform->is_cancelled()) {
         $USER->lang = $lang;
     }
 
-    redirect($redirect);
+    redirect($redirect, get_string('changessaved'), null, \core\output\notification::NOTIFY_SUCCESS);
 }
 
 // Display page header.

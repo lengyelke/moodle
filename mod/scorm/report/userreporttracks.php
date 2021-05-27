@@ -40,7 +40,7 @@ $url = new moodle_url('/mod/scorm/report/userreporttracks.php', array('id' => $i
 $cm = get_coursemodule_from_id('scorm', $id, 0, false, MUST_EXIST);
 $course = get_course($cm->course);
 $scorm = $DB->get_record('scorm', array('id' => $cm->instance), '*', MUST_EXIST);
-$user = $DB->get_record('user', array('id' => $userid), user_picture::fields(), MUST_EXIST);
+$user = $DB->get_record('user', array('id' => $userid), implode(',', \core_user\fields::get_picture_fields()), MUST_EXIST);
 $selsco = $DB->get_record('scorm_scoes', array('id' => $scoid), '*', MUST_EXIST);
 
 $PAGE->set_url($url);
@@ -50,6 +50,11 @@ $PAGE->set_url($url);
 require_login($course, false, $cm);
 $contextmodule = context_module::instance($cm->id);
 require_capability('mod/scorm:viewreport', $contextmodule);
+
+// Check user has group access.
+if (!groups_user_groups_visible($course, $userid, $cm)) {
+    throw new moodle_exception('nopermissiontoshow');
+}
 
 // Trigger a tracks viewed event.
 $event = \mod_scorm\event\tracks_viewed::create(array(

@@ -23,7 +23,7 @@
  */
 
 
-require_once(dirname(__FILE__) . '/../../config.php');
+require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot.'/mod/lesson/lib.php');
 require_once($CFG->dirroot.'/mod/lesson/locallib.php');
 require_once($CFG->dirroot.'/mod/lesson/override_form.php');
@@ -76,6 +76,16 @@ require_capability('mod/lesson:manageoverrides', $context);
 if ($overrideid) {
     // Editing an override.
     $data = clone $override;
+
+    if ($override->groupid) {
+        if (!groups_group_visible($override->groupid, $course, $cm)) {
+            print_error('invalidoverrideid', 'lesson');
+        }
+    } else {
+        if (!groups_user_groups_visible($course, $override->userid, $cm)) {
+            print_error('invalidoverrideid', 'lesson');
+        }
+    }
 } else {
     // Creating a new override.
     $data = new stdClass();
@@ -165,6 +175,8 @@ if ($mform->is_cancelled()) {
     if (!empty($override->id)) {
         $fromform->id = $override->id;
         $DB->update_record('lesson_overrides', $fromform);
+        $cachekey = $groupmode ? "{$fromform->lessonid}_g_{$fromform->groupid}" : "{$fromform->lessonid}_u_{$fromform->userid}";
+        cache::make('mod_lesson', 'overrides')->delete($cachekey);
 
         // Determine which override updated event to fire.
         $params['objectid'] = $override->id;
@@ -181,6 +193,8 @@ if ($mform->is_cancelled()) {
     } else {
         unset($fromform->id);
         $fromform->id = $DB->insert_record('lesson_overrides', $fromform);
+        $cachekey = $groupmode ? "{$fromform->lessonid}_g_{$fromform->groupid}" : "{$fromform->lessonid}_u_{$fromform->userid}";
+        cache::make('mod_lesson', 'overrides')->delete($cachekey);
 
         // Determine which override created event to fire.
         $params['objectid'] = $fromform->id;
@@ -196,7 +210,14 @@ if ($mform->is_cancelled()) {
         $event->trigger();
     }
 
-    lesson_update_events($lesson, $fromform);
+    if ($groupmode) {
+        // Priorities may have shifted, so we need to update all of the calendar events for group overrides.
+        lesson_update_events($lesson);
+    } else {
+        // User override. We only need to update the calendar event for this user override.
+        lesson_update_events($lesson, $fromform);
+    }
+
 
     if (!empty($fromform->submitbutton)) {
         redirect($overridelisturl);

@@ -74,7 +74,16 @@ class completion_completion extends data_object {
      * @return data_object instance of data_object or false if none found.
      */
     public static function fetch($params) {
-        return self::fetch_helper('course_completions', __CLASS__, $params);
+        $cache = cache::make('core', 'coursecompletion');
+
+        $key = $params['userid'] . '_' . $params['course'];
+        if ($hit = $cache->get($key)) {
+            return $hit['value'];
+        }
+
+        $tocache = self::fetch_helper('course_completions', __CLASS__, $params);
+        $cache->set($key, ['value' => $tocache]);
+        return $tocache;
     }
 
     /**
@@ -164,6 +173,36 @@ class completion_completion extends data_object {
             \core\event\course_completed::create_from_completion($data)->trigger();
         }
 
+        // Notify user.
+        $course = get_course($data->course);
+        $messagesubject = get_string('coursecompleted', 'completion');
+        $a = [
+            'coursename' => get_course_display_name_for_list($course),
+            'courselink' => (string) new moodle_url('/course/view.php', array('id' => $course->id)),
+        ];
+        $messagebody = get_string('coursecompletedmessage', 'completion', $a);
+        $messageplaintext = html_to_text($messagebody);
+
+        $eventdata = new \core\message\message();
+        $eventdata->courseid          = $course->id;
+        $eventdata->component         = 'moodle';
+        $eventdata->name              = 'coursecompleted';
+        $eventdata->userfrom          = core_user::get_noreply_user();
+        $eventdata->userto            = $data->userid;
+        $eventdata->notification      = 1;
+        $eventdata->subject           = $messagesubject;
+        $eventdata->fullmessage       = $messageplaintext;
+        $eventdata->fullmessageformat = FORMAT_HTML;
+        $eventdata->fullmessagehtml   = $messagebody;
+        $eventdata->smallmessage      = $messageplaintext;
+
+        if ($courseimage = \core_course\external\course_summary_exporter::get_course_image($course)) {
+            $eventdata->customdata  = [
+                'notificationpictureurl' => $courseimage,
+            ];
+        }
+        message_send($eventdata);
+
         return $result;
     }
 
@@ -179,9 +218,10 @@ class completion_completion extends data_object {
             $this->timeenrolled = 0;
         }
 
+        $result = false;
         // Save record
         if ($this->id) {
-            return $this->update();
+            $result = $this->update();
         } else {
             // Make sure reaggregate field is not null
             if (!$this->reaggregate) {
@@ -193,7 +233,17 @@ class completion_completion extends data_object {
                 $this->timestarted = 0;
             }
 
-            return $this->insert();
+            $result = $this->insert();
         }
+
+        if ($result) {
+            // Update the cached record.
+            $cache = cache::make('core', 'coursecompletion');
+            $data = $this->get_record_data();
+            $key = $data->userid . '_' . $data->course;
+            $cache->set($key, ['value' => $data]);
+        }
+
+        return $result;
     }
 }

@@ -36,7 +36,7 @@ class backup_task_testcase extends advanced_testcase {
     protected $courseid;  // course id used for testing
     protected $userid;      // user record used for testing
 
-    protected function setUp() {
+    protected function setUp(): void {
         global $DB, $CFG;
         parent::setUp();
 
@@ -93,6 +93,7 @@ class backup_task_testcase extends advanced_testcase {
         $checksum = $bt->calculate_checksum();
         $this->assertTrue($bt->is_checksum_correct($checksum));
 
+        $bc->destroy();
     }
 
     /**

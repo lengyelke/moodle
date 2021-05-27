@@ -35,7 +35,7 @@ defined('MOODLE_INTERNAL') || die();
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class tree_testcase extends \advanced_testcase {
-    public function setUp() {
+    public function setUp(): void {
         // Load the mock classes so they can be used.
         require_once(__DIR__ . '/fixtures/mock_condition.php');
         require_once(__DIR__ . '/fixtures/mock_info.php');
@@ -49,83 +49,83 @@ class tree_testcase extends \advanced_testcase {
             new tree('frog');
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('not object', $e->getMessage());
+            $this->assertStringContainsString('not object', $e->getMessage());
         }
         try {
             new tree((object)array());
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('missing ->op', $e->getMessage());
+            $this->assertStringContainsString('missing ->op', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '*'));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('unknown ->op', $e->getMessage());
+            $this->assertStringContainsString('unknown ->op', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '|'));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('missing ->show', $e->getMessage());
+            $this->assertStringContainsString('missing ->show', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '|', 'show' => 0));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('->show not bool', $e->getMessage());
+            $this->assertStringContainsString('->show not bool', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '&'));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('missing ->showc', $e->getMessage());
+            $this->assertStringContainsString('missing ->showc', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '&', 'showc' => 0));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('->showc not array', $e->getMessage());
+            $this->assertStringContainsString('->showc not array', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '&', 'showc' => array(0)));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('->showc value not bool', $e->getMessage());
+            $this->assertStringContainsString('->showc value not bool', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '|', 'show' => true));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('missing ->c', $e->getMessage());
+            $this->assertStringContainsString('missing ->c', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '|', 'show' => true,
                     'c' => 'side'));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('->c not array', $e->getMessage());
+            $this->assertStringContainsString('->c not array', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '|', 'show' => true,
                     'c' => array(3)));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('child not object', $e->getMessage());
+            $this->assertStringContainsString('child not object', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '|', 'show' => true,
                     'c' => array((object)array('type' => 'doesnotexist'))));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('Unknown condition type: doesnotexist', $e->getMessage());
+            $this->assertStringContainsString('Unknown condition type: doesnotexist', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '|', 'show' => true,
                     'c' => array((object)array())));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('missing ->op', $e->getMessage());
+            $this->assertStringContainsString('missing ->op', $e->getMessage());
         }
         try {
             new tree((object)array('op' => '&',
@@ -134,7 +134,7 @@ class tree_testcase extends \advanced_testcase {
                     ));
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('->c, ->showc mismatch', $e->getMessage());
+            $this->assertStringContainsString('->c, ->showc mismatch', $e->getMessage());
         }
     }
 
@@ -221,7 +221,7 @@ class tree_testcase extends \advanced_testcase {
         list ($available, $information) = $this->get_available_results(
                 $structure, $info, $USER->id);
         $this->assertFalse($available);
-        $this->assertRegExp('~any of.*no.*way~', $information);
+        $this->assertMatchesRegularExpression('~any of.*no.*way~', $information);
 
         // Two conditions, OR, resolving as false, no display.
         $structure->show = false;
@@ -257,7 +257,7 @@ class tree_testcase extends \advanced_testcase {
         list ($available, $information) = $this->get_available_results(
                 $structure, $info, $USER->id);
         $this->assertFalse($available);
-        $this->assertRegExp('~wom.*bat~', $information);
+        $this->assertMatchesRegularExpression('~wom.*bat~', $information);
 
         // Two conditions, AND, both false, show turned off for one. When
         // show is turned off, that means if you don't have that condition
@@ -287,7 +287,7 @@ class tree_testcase extends \advanced_testcase {
         list ($available, $information) = $this->get_available_results(
                 $structure, $info, $USER->id);
         $this->assertFalse($available);
-        $this->assertRegExp('~!wom.*!bat~', $information);
+        $this->assertMatchesRegularExpression('~!wom.*!bat~', $information);
 
         // Two conditions, NOT AND, both true.
         $structure->op = '!&';
@@ -296,7 +296,7 @@ class tree_testcase extends \advanced_testcase {
         list ($available, $information) = $this->get_available_results(
                 $structure, $info, $USER->id);
         $this->assertFalse($available);
-        $this->assertRegExp('~any of.*!wom.*!bat~', $information);
+        $this->assertMatchesRegularExpression('~any of.*!wom.*!bat~', $information);
 
         // Two conditions, NOT AND, one true.
         $structure->c[1]->a = false;
@@ -330,7 +330,7 @@ class tree_testcase extends \advanced_testcase {
         list ($available, $information) = $this->get_available_results(
                 $structure, $info, $USER->id);
         $this->assertFalse($available);
-        $this->assertRegExp('~<ul.*<ul.*<li.*1.*<li.*2.*</ul>.*<li.*3~', $information);
+        $this->assertMatchesRegularExpression('~<ul.*<ul.*<li.*1.*<li.*2.*</ul>.*<li.*3~', $information);
     }
 
     /**
@@ -424,7 +424,7 @@ class tree_testcase extends \advanced_testcase {
                     self::mock(array('m' => '2'))), tree::OP_AND),
                 self::mock(array('m' => 3)));
         $tree = new tree($structure);
-        $this->assertRegExp('~<ul.*<ul.*<li.*1.*<li.*2.*</ul>.*<li.*3~',
+        $this->assertMatchesRegularExpression('~<ul.*<ul.*<li.*1.*<li.*2.*</ul>.*<li.*3~',
                 $renderer->render($tree->get_full_information($info)));
 
         // Test intro messages before list. First, OR message.
@@ -433,13 +433,13 @@ class tree_testcase extends \advanced_testcase {
                 self::mock(array('m' => '2'))
         );
         $tree = new tree($structure);
-        $this->assertRegExp('~Not available unless any of:.*<ul>~',
+        $this->assertMatchesRegularExpression('~Not available unless any of:.*<ul>~',
                 $renderer->render($tree->get_full_information($info)));
 
         // Now, OR message when not shown.
         $structure->show = false;
         $tree = new tree($structure);
-        $this->assertRegExp('~hidden.*<ul>~',
+        $this->assertMatchesRegularExpression('~hidden.*<ul>~',
                 $renderer->render($tree->get_full_information($info)));
 
         // AND message.
@@ -447,11 +447,11 @@ class tree_testcase extends \advanced_testcase {
         unset($structure->show);
         $structure->showc = array(false, false);
         $tree = new tree($structure);
-        $this->assertRegExp('~Not available unless:.*<ul>~',
+        $this->assertMatchesRegularExpression('~Not available unless:.*<ul>~',
                 $renderer->render($tree->get_full_information($info)));
 
         // Hidden markers on items.
-        $this->assertRegExp('~1.*hidden.*2.*hidden~',
+        $this->assertMatchesRegularExpression('~1.*hidden.*2.*hidden~',
                 $renderer->render($tree->get_full_information($info)));
 
         // Hidden markers on child tree and items.
@@ -459,11 +459,11 @@ class tree_testcase extends \advanced_testcase {
                 self::mock(array('m' => '2')),
                 self::mock(array('m' => '3'))), tree::OP_AND);
         $tree = new tree($structure);
-        $this->assertRegExp('~1.*hidden.*All of \(hidden.*2.*3~',
+        $this->assertMatchesRegularExpression('~1.*hidden.*All of \(hidden.*2.*3~',
                 $renderer->render($tree->get_full_information($info)));
         $structure->c[1]->op = '|';
         $tree = new tree($structure);
-        $this->assertRegExp('~1.*hidden.*Any of \(hidden.*2.*3~',
+        $this->assertMatchesRegularExpression('~1.*hidden.*Any of \(hidden.*2.*3~',
                 $renderer->render($tree->get_full_information($info)));
 
         // Hidden markers on single-item display, AND and OR.
@@ -472,14 +472,14 @@ class tree_testcase extends \advanced_testcase {
                 self::mock(array('m' => '1'))
         );
         $tree = new tree($structure);
-        $this->assertRegExp('~1.*hidden~',
+        $this->assertMatchesRegularExpression('~1.*hidden~',
                 $tree->get_full_information($info));
 
         unset($structure->showc);
         $structure->show = false;
         $structure->op = '|';
         $tree = new tree($structure);
-        $this->assertRegExp('~1.*hidden~',
+        $this->assertMatchesRegularExpression('~1.*hidden~',
                 $tree->get_full_information($info));
 
         // Hidden marker if single item is tree.
@@ -487,13 +487,13 @@ class tree_testcase extends \advanced_testcase {
                 self::mock(array('m' => '1')),
                 self::mock(array('m' => '2'))), tree::OP_AND);
         $tree = new tree($structure);
-        $this->assertRegExp('~Not available \(hidden.*1.*2~',
+        $this->assertMatchesRegularExpression('~Not available \(hidden.*1.*2~',
                 $renderer->render($tree->get_full_information($info)));
 
         // Single item tree containing single item.
         unset($structure->c[0]->c[1]);
         $tree = new tree($structure);
-        $this->assertRegExp('~SA.*1.*hidden~',
+        $this->assertMatchesRegularExpression('~SA.*1.*hidden~',
                 $tree->get_full_information($info));
     }
 
@@ -673,6 +673,63 @@ class tree_testcase extends \advanced_testcase {
         $this->assertEquals('{"op":"&","c":[' . $childstr . ',' . $childstr .
                     '],"showc":[true,false]}',
                 json_encode(tree::get_root_json(array($child, $child), tree::OP_AND, array(true, false))));
+    }
+
+    /**
+     * Tests the behaviour of the counter in unique_sql_parameter().
+     *
+     * There was a problem with static counters used to implement a sequence of
+     * parameter placeholders (MDL-53481). As always with static variables, it
+     * is a bit tricky to unit test the behaviour reliably as it depends on the
+     * actual tests executed and also their order.
+     *
+     * To minimise risk of false expected behaviour, this test method should be
+     * first one where {@link core_availability\tree::get_user_list_sql()} is
+     * used. We also use higher number of condition instances to increase the
+     * risk of the counter collision, should there remain a problem.
+     */
+    public function test_unique_sql_parameter_behaviour() {
+        global $DB;
+        $this->resetAfterTest();
+        $generator = $this->getDataGenerator();
+
+        // Create a test course with multiple groupings and groups and a student in each of them.
+        $course = $generator->create_course();
+        $user = $generator->create_user();
+        $studentroleid = $DB->get_field('role', 'id', array('shortname' => 'student'));
+        $generator->enrol_user($user->id, $course->id, $studentroleid);
+        // The total number of groupings and groups must not be greater than 61.
+        // There is a limit in MySQL on the max number of joined tables.
+        $groups = [];
+        for ($i = 0; $i < 25; $i++) {
+            $group = $generator->create_group(array('courseid' => $course->id));
+            groups_add_member($group, $user);
+            $groups[] = $group;
+        }
+        $groupings = [];
+        for ($i = 0; $i < 25; $i++) {
+            $groupings[] = $generator->create_grouping(array('courseid' => $course->id));
+        }
+        foreach ($groupings as $grouping) {
+            foreach ($groups as $group) {
+                groups_assign_grouping($grouping->id, $group->id);
+            }
+        }
+        $info = new \core_availability\mock_info($course);
+
+        // Make a huge tree with 'AND' of all groups and groupings conditions.
+        $conditions = [];
+        foreach ($groups as $group) {
+            $conditions[] = \availability_group\condition::get_json($group->id);
+        }
+        foreach ($groupings as $groupingid) {
+            $conditions[] = \availability_grouping\condition::get_json($grouping->id);
+        }
+        shuffle($conditions);
+        $tree = new tree(tree::get_root_json($conditions));
+        list($sql, $params) = $tree->get_user_list_sql(false, $info, false);
+        // This must not throw exception.
+        $DB->fix_sql_params($sql, $params);
     }
 
     /**

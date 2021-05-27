@@ -31,6 +31,8 @@ if (! $cm = get_coursemodule_from_id('survey', $id)) {
     print_error('invalidcoursemodule');
 }
 
+$cm = cm_info::create($cm);
+
 if (! $course = $DB->get_record("course", array("id" => $cm->course))) {
     print_error('coursemisconf');
 }
@@ -69,7 +71,12 @@ $strsurvey = get_string("modulename", "survey");
 $PAGE->set_title($survey->name);
 $PAGE->set_heading($course->fullname);
 echo $OUTPUT->header();
-echo $OUTPUT->heading($survey->name);
+echo $OUTPUT->heading(format_string($survey->name));
+
+// Render the activity information.
+$completiondetails = \core_completion\cm_completion_details::get_instance($cm, $USER->id);
+$activitydates = \core\activity_dates::get_dates_for_module($cm, $USER->id);
+echo $OUTPUT->activity_information($cm, $completiondetails, $activitydates);
 
 // Check to see if groups are being used in this survey.
 if ($groupmode = groups_get_activity_groupmode($cm)) {   // Groups are being used.
@@ -151,9 +158,7 @@ echo '<div>'. get_string('allquestionrequireanswer', 'survey'). '</div>';
 $questions = survey_get_questions($survey);
 
 global $qnum;  // TODO: ugly globals hack for survey_print_*().
-global $checklist; // TODO: ugly globals hack for survey_print_*().
 $qnum = 0;
-$checklist = array();
 foreach ($questions as $question) {
 
     if ($question->type >= 0) {
@@ -175,23 +180,10 @@ if (!is_enrolled($context)) {
     exit;
 }
 
-$checkarray = Array('questions' => Array());
-if (!empty($checklist)) {
-    foreach ($checklist as $question => $default) {
-        $checkarray['questions'][] = Array('question' => $question, 'default' => $default);
-    }
-}
-$PAGE->requires->data_for_js('surveycheck', $checkarray);
-$module = array(
-    'name'      => 'mod_survey',
-    'fullpath'  => '/mod/survey/survey.js',
-    'requires'  => array('yui2-event'),
-);
-$PAGE->requires->string_for_js('questionsnotanswered', 'survey');
-$PAGE->requires->js_init_call('M.mod_survey.init', $checkarray, true, $module);
+$PAGE->requires->js_call_amd('mod_survey/validation', 'ensureRadiosChosen', array('surveyform'));
 
 echo '<br />';
-echo '<input type="submit" value="'.get_string("clicktocontinue", "survey").'" />';
+echo '<input type="submit" class="btn btn-primary" value="'.get_string("clicktocontinue", "survey").'" />';
 echo '</div>';
 echo "</form>";
 

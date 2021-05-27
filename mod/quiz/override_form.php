@@ -78,12 +78,15 @@ class quiz_override_form extends moodleform {
     }
 
     protected function definition() {
-        global $CFG, $DB;
+        global $DB;
 
         $cm = $this->cm;
         $mform = $this->_form;
 
         $mform->addElement('header', 'override', get_string('override', 'quiz'));
+
+        $quizgroupmode = groups_get_activity_groupmode($cm);
+        $accessallgroups = ($quizgroupmode == NOGROUPS) || has_capability('moodle/site:accessallgroups', $this->context);
 
         if ($this->groupmode) {
             // Group override.
@@ -96,7 +99,8 @@ class quiz_override_form extends moodleform {
                 $mform->freeze('groupid');
             } else {
                 // Prepare the list of groups.
-                $groups = groups_get_all_groups($cm->course);
+                // Only include the groups the current can access.
+                $groups = $accessallgroups ? groups_get_all_groups($cm->course) : groups_get_activity_allowed_groups($cm);
                 if (empty($groups)) {
                     // Generate an error.
                     $link = new moodle_url('/mod/quiz/overrides.php', array('cmid'=>$cm->id));
@@ -119,11 +123,14 @@ class quiz_override_form extends moodleform {
             }
         } else {
             // User override.
+            // TODO Does not support custom user profile fields (MDL-70456).
+            $userfieldsapi = \core_user\fields::for_identity($this->context, false)->with_userpic()->with_name();
+            $extrauserfields = $userfieldsapi->get_required_fields([\core_user\fields::PURPOSE_IDENTITY]);
             if ($this->userid) {
                 // There is already a userid, so freeze the selector.
-                $user = $DB->get_record('user', array('id'=>$this->userid));
+                $user = $DB->get_record('user', ['id' => $this->userid]);
                 $userchoices = array();
-                $userchoices[$this->userid] = fullname($user);
+                $userchoices[$this->userid] = $this->display_user_name($user, $extrauserfields);
                 $mform->addElement('select', 'userid',
                         get_string('overrideuser', 'quiz'), $userchoices);
                 $mform->freeze('userid');
@@ -136,9 +143,16 @@ class quiz_override_form extends moodleform {
                             'This is unexpected, and a problem because there is no way to pass these ' .
                             'parameters to get_users_by_capability. See MDL-34657.');
                 }
-                $users = get_users_by_capability($this->context, 'mod/quiz:attempt',
-                        'u.id, u.email, ' . get_all_user_name_fields(true, 'u'),
-                        $sort, '', '', '', '', false, true);
+
+                // Get the list of appropriate users, depending on whether and how groups are used.
+                $userfields = $userfieldsapi->get_sql('u', false, '', 'userid', false)->selects;
+                if ($accessallgroups) {
+                    $users = get_users_by_capability($this->context, 'mod/quiz:attempt',
+                            $userfields, $sort);
+                } else if ($groups = groups_get_activity_allowed_groups($cm)) {
+                    $users = get_users_by_capability($this->context, 'mod/quiz:attempt',
+                            $userfields, $sort, '', '', array_keys($groups));
+                }
 
                 // Filter users based on any fixed restrictions (groups, profile).
                 $info = new \core_availability\info_module($cm);
@@ -150,23 +164,12 @@ class quiz_override_form extends moodleform {
                     print_error('usersnone', 'quiz', $link);
                 }
 
-                $userchoices = array();
-                $canviewemail = in_array('email', get_extra_user_fields($this->context));
+                $userchoices = [];
                 foreach ($users as $id => $user) {
-                    if (empty($invalidusers[$id]) || (!empty($override) &&
-                            $id == $override->userid)) {
-                        if ($canviewemail) {
-                            $userchoices[$id] = fullname($user) . ', ' . $user->email;
-                        } else {
-                            $userchoices[$id] = fullname($user);
-                        }
-                    }
+                    $userchoices[$id] = $this->display_user_name($user, $extrauserfields);
                 }
                 unset($users);
 
-                if (count($userchoices) == 0) {
-                    $userchoices[0] = get_string('none');
-                }
                 $mform->addElement('searchableselector', 'userid',
                         get_string('overrideuser', 'quiz'), $userchoices);
                 $mform->addRule('userid', get_string('required'), 'required', null, 'client');
@@ -203,6 +206,7 @@ class quiz_override_form extends moodleform {
         }
         $mform->addElement('select', 'attempts',
                 get_string('attemptsallowed', 'quiz'), $attemptoptions);
+        $mform->addHelpButton('attempts', 'attempts', 'quiz');
         $mform->setDefault('attempts', $this->quiz->attempts);
 
         // Submit buttons.
@@ -218,11 +222,30 @@ class quiz_override_form extends moodleform {
 
         $mform->addGroup($buttonarray, 'buttonbar', '', array(' '), false);
         $mform->closeHeaderBefore('buttonbar');
+    }
 
+    /**
+     * Get a user's name and identity ready to display.
+     *
+     * @param stdClass $user a user object.
+     * @param array $extrauserfields (identity fields in user table only from the user_fields API)
+     * @return string User's name, with extra info, for display.
+     */
+    protected function display_user_name(stdClass $user, array $extrauserfields) {
+        $username = fullname($user);
+        $namefields = [];
+        foreach ($extrauserfields as $field) {
+            if (isset($user->$field) && $user->$field !== '') {
+                $namefields[] = $user->$field;
+            }
+        }
+        if ($namefields) {
+            $username .= ' (' . implode(', ', $namefields) . ')';
+        }
+        return $username;
     }
 
     public function validation($data, $files) {
-        global $COURSE, $DB;
         $errors = parent::validation($data, $files);
 
         $mform =& $this->_form;

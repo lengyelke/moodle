@@ -67,7 +67,7 @@ abstract class database_driver_testcase extends base_testcase {
         $this->setRunTestInSeparateProcess(false);
     }
 
-    public static function setUpBeforeClass() {
+    public static function setUpBeforeClass(): void {
         global $CFG;
         parent::setUpBeforeClass();
 
@@ -101,7 +101,7 @@ abstract class database_driver_testcase extends base_testcase {
         self::$extradb = $d;
     }
 
-    protected function setUp() {
+    protected function setUp(): void {
         global $DB;
         parent::setUp();
 
@@ -112,7 +112,7 @@ abstract class database_driver_testcase extends base_testcase {
         }
     }
 
-    protected function tearDown() {
+    protected function tearDown(): void {
         // delete all test tables
         $dbman = $this->tdb->get_manager();
         $tables = $this->tdb->get_tables(false);
@@ -125,7 +125,7 @@ abstract class database_driver_testcase extends base_testcase {
         parent::tearDown();
     }
 
-    public static function tearDownAfterClass() {
+    public static function tearDownAfterClass(): void {
         if (self::$extradb) {
             self::$extradb->dispose();
             self::$extradb = null;
@@ -138,11 +138,18 @@ abstract class database_driver_testcase extends base_testcase {
      * Runs the bare test sequence.
      * @return void
      */
-    public function runBare() {
+    public function runBare(): void {
         try {
             parent::runBare();
 
-        } catch (Exception $e) {
+        } catch (Exception $ex) {
+            $e = $ex;
+        } catch (Throwable $ex) {
+            // Engine errors in PHP7 throw exceptions of type Throwable (this "catch" will be ignored in PHP5).
+            $e = $ex;
+        }
+
+        if (isset($e)) {
             if ($this->tdb->is_transaction_started()) {
                 $this->tdb->force_transaction_rollback();
             }

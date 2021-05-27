@@ -81,12 +81,15 @@ class lesson_override_form extends moodleform {
      * Define this form - called by the parent constructor
      */
     protected function definition() {
-        global $CFG, $DB;
+        global $DB;
 
         $cm = $this->cm;
         $mform = $this->_form;
 
         $mform->addElement('header', 'override', get_string('override', 'lesson'));
+
+        $lessongroupmode = groups_get_activity_groupmode($cm);
+        $accessallgroups = ($lessongroupmode == NOGROUPS) || has_capability('moodle/site:accessallgroups', $this->context);
 
         if ($this->groupmode) {
             // Group override.
@@ -99,7 +102,8 @@ class lesson_override_form extends moodleform {
                 $mform->freeze('groupid');
             } else {
                 // Prepare the list of groups.
-                $groups = groups_get_all_groups($cm->course);
+                // Only include the groups the current can access.
+                $groups = $accessallgroups ? groups_get_all_groups($cm->course) :  groups_get_activity_allowed_groups($cm);
                 if (empty($groups)) {
                     // Generate an error.
                     $link = new moodle_url('/mod/lesson/overrides.php', array('cmid' => $cm->id));
@@ -132,8 +136,28 @@ class lesson_override_form extends moodleform {
                 $mform->freeze('userid');
             } else {
                 // Prepare the list of users.
-                $users = get_enrolled_users($this->context, '', 0,
-                        'u.id, u.email, ' . get_all_user_name_fields(true, 'u'));
+                $users = [];
+                list($sort) = users_order_by_sql('u');
+
+                // Get the list of appropriate users, depending on whether and how groups are used.
+                $userfieldsapi = \core_user\fields::for_name();
+                if ($accessallgroups) {
+                    $users = get_enrolled_users($this->context, '', 0,
+                            'u.id, u.email, ' . $userfieldsapi->get_sql('u', false, '', '', false)->selects, $sort);
+                } else if ($groups = groups_get_activity_allowed_groups($cm)) {
+                    $enrolledjoin = get_enrolled_join($this->context, 'u.id');
+                    $userfields = 'u.id, u.email, ' . $userfieldsapi->get_sql('u', false, '', '', false)->selects;
+                    list($ingroupsql, $ingroupparams) = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
+                    $params = $enrolledjoin->params + $ingroupparams;
+                    $sql = "SELECT $userfields
+                              FROM {user} u
+                              JOIN {groups_members} gm ON gm.userid = u.id
+                                   {$enrolledjoin->joins}
+                             WHERE gm.groupid $ingroupsql
+                                   AND {$enrolledjoin->wheres}
+                          ORDER BY $sort";
+                    $users = $DB->get_records_sql($sql, $params);
+                }
 
                 // Filter users based on any fixed restrictions (groups, profile).
                 $info = new \core_availability\info_module($cm);
@@ -146,7 +170,8 @@ class lesson_override_form extends moodleform {
                 }
 
                 $userchoices = array();
-                $canviewemail = in_array('email', get_extra_user_fields($this->context));
+                // TODO Does not support custom user profile fields (MDL-70456).
+                $canviewemail = in_array('email', \core_user\fields::get_identity_fields($this->context, false));
                 foreach ($users as $id => $user) {
                     if (empty($invalidusers[$id]) || (!empty($override) &&
                             $id == $override->userid)) {
@@ -235,7 +260,6 @@ class lesson_override_form extends moodleform {
      * @return array of "element_name"=>"error_description" if there are errors
      */
     public function validation($data, $files) {
-        global $COURSE, $DB;
         $errors = parent::validation($data, $files);
 
         $mform =& $this->_form;

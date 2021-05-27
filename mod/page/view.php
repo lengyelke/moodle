@@ -72,6 +72,12 @@ if (!isset($options['printheading']) || !empty($options['printheading'])) {
     echo $OUTPUT->heading(format_string($page->name), 2);
 }
 
+// Display any activity information (eg completion requirements / dates).
+$cminfo = cm_info::create($cm);
+$completiondetails = \core_completion\cm_completion_details::get_instance($cminfo, $USER->id);
+$activitydates = \core\activity_dates::get_dates_for_module($cminfo, $USER->id);
+echo $OUTPUT->activity_information($cminfo, $completiondetails, $activitydates);
+
 if (!empty($options['printintro'])) {
     if (trim(strip_tags($page->intro))) {
         echo $OUTPUT->box_start('mod_introbox', 'pageintro');
@@ -88,7 +94,9 @@ $formatoptions->context = $context;
 $content = format_text($content, $page->contentformat, $formatoptions);
 echo $OUTPUT->box($content, "generalbox center clearfix");
 
-$strlastmodified = get_string("lastmodified");
-echo "<div class=\"modified\">$strlastmodified: ".userdate($page->timemodified)."</div>";
+if (!isset($options['printlastmodified']) || !empty($options['printlastmodified'])) {
+    $strlastmodified = get_string("lastmodified");
+    echo html_writer::div("$strlastmodified: " . userdate($page->timemodified), 'modified');
+}
 
 echo $OUTPUT->footer();

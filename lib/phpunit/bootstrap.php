@@ -50,7 +50,6 @@ if (!defined('IGNORE_COMPONENT_CACHE')) {
 
 require_once(__DIR__.'/bootstraplib.php');
 require_once(__DIR__.'/../testing/lib.php');
-require_once(__DIR__.'/classes/autoloader.php');
 
 if (isset($_SERVER['REMOTE_ADDR'])) {
     phpunit_bootstrap_error(1, 'Unit tests can be executed only from command line!');
@@ -72,19 +71,13 @@ if (defined('CLI_SCRIPT')) {
 }
 define('CLI_SCRIPT', true);
 
-$phpunitversion = PHPUnit_Runner_Version::id();
+$phpunitversion = PHPUnit\Runner\Version::id();
 if ($phpunitversion === '@package_version@') {
     // library checked out from git, let's hope dev knows that 3.6.0 is required
 } else if (version_compare($phpunitversion, '3.6.0', 'lt')) {
     phpunit_bootstrap_error(PHPUNIT_EXITCODE_PHPUNITWRONG, $phpunitversion);
 }
 unset($phpunitversion);
-
-if (!include_once('PHPUnit/Extensions/Database/Autoload.php')) {
-    phpunit_bootstrap_error(PHPUNIT_EXITCODE_PHPUNITEXTMISSING, 'phpunit/DbUnit');
-}
-
-define('NO_OUTPUT_BUFFERING', true);
 
 // only load CFG from config.php, stop ASAP in lib/setup.php
 define('ABORT_AFTER_CONFIG', true);
@@ -170,7 +163,7 @@ if (isset($CFG->prefix) and $CFG->prefix === $CFG->phpunit_prefix) {
 }
 
 // override CFG settings if necessary and throw away extra CFG settings
-$CFG->wwwroot   = 'http://www.example.com/moodle';
+$CFG->wwwroot   = 'https://www.example.com/moodle';
 $CFG->dataroot  = $CFG->phpunit_dataroot;
 $CFG->prefix    = $CFG->phpunit_prefix;
 $CFG->dbtype    = isset($CFG->phpunit_dbtype) ? $CFG->phpunit_dbtype : $CFG->dbtype;
@@ -185,7 +178,8 @@ $CFG->dboptions = isset($CFG->phpunit_dboptions) ? $CFG->phpunit_dboptions : $CF
 $allowed = array('wwwroot', 'dataroot', 'dirroot', 'admin', 'directorypermissions', 'filepermissions',
                  'dbtype', 'dblibrary', 'dbhost', 'dbname', 'dbuser', 'dbpass', 'prefix', 'dboptions',
                  'proxyhost', 'proxyport', 'proxytype', 'proxyuser', 'proxypassword', 'proxybypass', // keep proxy settings from config.php
-                 'altcacheconfigpath', 'pathtogs', 'pathtoclam', 'pathtodu', 'aspellpath', 'pathtodot'
+                 'altcacheconfigpath', 'pathtogs', 'pathtophp', 'pathtodu', 'aspellpath', 'pathtodot',
+                 'pathtounoconv', 'alternative_file_system_class', 'pathtopython'
                 );
 $productioncfg = (array)$CFG;
 $CFG = new stdClass();
@@ -218,6 +212,10 @@ require_once("$CFG->dirroot/lib/phpunit/lib.php");
 
 // finish moodle init
 define('ABORT_AFTER_CONFIG_CANCEL', true);
+if (isset($CFG->phpunit_profilingenabled) && $CFG->phpunit_profilingenabled) {
+    $CFG->profilingenabled = true;
+    $CFG->profilingincluded = '*';
+}
 require("$CFG->dirroot/lib/setup.php");
 
 raise_memory_limit(MEMORY_HUGE);

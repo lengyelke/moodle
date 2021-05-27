@@ -4,7 +4,6 @@ Feature: Set time spent as a completion condition for a lesson
   As a teacher
   I need to set time spent to mark the lesson activity as completed
 
-  @javascript
   Scenario: Set time spent as a condition
     Given the following "users" exist:
       | username | firstname | lastname | email |
@@ -17,22 +16,28 @@ Feature: Set time spent as a completion condition for a lesson
       | user | course | role |
       | teacher1 | C1 | editingteacher |
       | student1 | C1 | student |
-    And the following config values are set as admin:
-      | enablecompletion | 1 |
+    And the following "activity" exists:
+      | activity      | lesson                  |
+      | course        | C1                      |
+      | idnumber      | 0001                    |
+      | name          | Test lesson             |
+      | intro         | Test lesson description |
     And I log in as "teacher1"
-    And I follow "Course 1"
-    And I turn editing mode on
-    And I click on "Edit settings" "link" in the "Administration" "block"
+    And I am on "Course 1" course homepage
+    And I navigate to "Edit settings" in current page administration
     And I set the following fields to these values:
       | Enable completion tracking | Yes |
     And I press "Save and display"
-    And I add a "Lesson" to section "1" and I fill the form with:
-      | Name | Test lesson |
-      | Description | Test lesson description |
+    And I follow "Test lesson"
+    And I navigate to "Edit settings" in current page administration
+    And I set the following fields to these values:
       | Completion tracking | Show activity as complete when conditions are met |
-      | completiontimespentenabled | 1 |
-      | completiontimespent[timeunit] | 60 |
-      | completiontimespent[number] | 1 |
+      | completionview                | 0 |
+      | completiontimespentenabled    | 1 |
+      | completiontimespent[timeunit] | 1 |
+      | completiontimespent[number]   | 10 |
+    And I press "Save and return to course"
+    And I am on "Course 1" course homepage
     And I follow "Test lesson"
     And I follow "Add a content page"
     And I set the following fields to these values:
@@ -52,24 +57,26 @@ Feature: Set time spent as a completion condition for a lesson
     And I press "Save page"
     And I log out
     When I log in as "student1"
-    And I follow "Course 1"
-    Then the "Test lesson" "lesson" activity with "auto" completion should be marked as not complete
+    And I am on "Course 1" course homepage
+    Then the "Spend at least 10 secs on this activity" completion condition of "Test lesson" is displayed as "todo"
     And I follow "Test lesson"
     And I press "Next page"
+    # Add 1 sec delay so lesson knows a valid attempt has been made in past.
+    And I wait "1" seconds
     And I press "Next page"
     And I should see "You completed this lesson in"
-    And I should see ", which is less than the required time of 1 min. You might need to attempt the lesson again."
-    And I follow "Course 1"
-    And the "Test lesson" "lesson" activity with "auto" completion should be marked as not complete
-    And I follow "Course 1"
+    And I should see ", which is less than the required time of 10 secs. You might need to attempt the lesson again."
+    And I am on "Course 1" course homepage
+    And the "Spend at least 10 secs on this activity" completion condition of "Test lesson" is displayed as "todo"
+    And I am on "Course 1" course homepage
     And I follow "Test lesson"
     And I press "Next page"
-    And I wait "61" seconds
+    And I wait "11" seconds
     And I press "Next page"
     And I should not see "You might need to attempt the lesson again."
-    And I follow "Course 1"
-    And the "Test lesson" "lesson" activity with "auto" completion should be marked as complete
+    And I am on "Course 1" course homepage
+    And the "Spend at least 10 secs on this activity" completion condition of "Test lesson" is displayed as "done"
     And I log out
     And I log in as "teacher1"
-    And I follow "Course 1"
+    And I am on "Course 1" course homepage
     And "Student 1" user has completed "Test lesson" activity

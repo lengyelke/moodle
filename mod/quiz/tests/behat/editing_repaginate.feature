@@ -19,9 +19,7 @@ Feature: Edit quiz page - pagination
       | quiz       | Quiz 1 | Quiz 1 description | C1     | quiz1    |
 
     When I log in as "teacher1"
-    And I follow "Course 1"
-    And I follow "Quiz 1"
-    And I follow "Edit quiz"
+    And I am on the "Quiz 1" "mod_quiz > Edit" page
 
   @javascript
   Scenario: Repaginate questions with N question(s) per page as well as clicking
@@ -30,9 +28,9 @@ Feature: Edit quiz page - pagination
     Then I should see "Editing quiz: Quiz 1"
 
     # Add the first Essay question.
-    And I follow "Add"
+    And I open the action menu in ".page-add-actions" "css_element"
     And I follow "a new question"
-    And I set the field "qtype_qtype_essay" to "1"
+    And I set the field "item_qtype_essay" to "1"
     And I press "submitbutton"
     Then I should see "Adding an Essay question"
     And I set the field "Question name" to "Essay 01 new"
@@ -42,9 +40,9 @@ Feature: Edit quiz page - pagination
     And I should see "Essay 01 new" on quiz page "1"
 
     # Add the second Essay question.
-    And I follow "Add"
+    And I open the action menu in ".page-add-actions" "css_element"
     And I follow "a new question"
-    And I set the field "qtype_qtype_essay" to "1"
+    And I set the field "item_qtype_essay" to "1"
     And I press "submitbutton"
     Then I should see "Adding an Essay question"
     And I set the field "Question name" to "Essay 02 new"
@@ -67,9 +65,9 @@ Feature: Edit quiz page - pagination
     And I should not see "Page 2"
 
     # Add the third Essay question.
-    And I follow "Add"
+    And I open the action menu in ".page-add-actions" "css_element"
     And I follow "a new question"
-    And I set the field "qtype_qtype_essay" to "1"
+    And I set the field "item_qtype_essay" to "1"
     And I press "submitbutton"
     Then I should see "Adding an Essay question"
     And I set the field "Question name" to "Essay 03 new"
@@ -109,15 +107,15 @@ Feature: Edit quiz page - pagination
     # Repaginate one question per page.
     When I press "Repaginate"
     And I set the field "menuquestionsperpage" to "1"
-    And I press "Go"
+    And I click on "Go" "button" in the "Repaginate" "dialogue"
     Then I should see "Essay 01 new" on quiz page "1"
     And I should see "Essay 02 new" on quiz page "2"
     And I should see "Essay 03 new" on quiz page "3"
 
     # Add the forth Essay question in a new page (Page 4).
     When I open the "Page 3" add to quiz menu
-    And I follow "a new question" in the open menu
-    And I set the field "qtype_qtype_essay" to "1"
+    And I choose "a new question" in the open action menu
+    And I set the field "item_qtype_essay" to "1"
     And I press "submitbutton"
     Then I should see "Adding an Essay question"
     When I set the field "Question name" to "Essay 04 new"
@@ -138,7 +136,7 @@ Feature: Edit quiz page - pagination
     # Repaginate with 2 questions per page.
     When I press "Repaginate"
     And I set the field "menuquestionsperpage" to "2"
-    And I press "Go"
+    And I click on "Go" "button" in the "Repaginate" "dialogue"
     Then I should see "Essay 01 new" on quiz page "1"
     And I should see "Essay 02 new" on quiz page "1"
     And I should see "Essay 03 new" on quiz page "2"
@@ -147,7 +145,7 @@ Feature: Edit quiz page - pagination
     # Repaginate with unlimited questions per page (All questions on Page 1).
     When I press "Repaginate"
     And I set the field "menuquestionsperpage" to "Unlimited"
-    And I press "Go"
+    And I click on "Go" "button" in the "Repaginate" "dialogue"
     Then I should see "Essay 01 new" on quiz page "1"
     And I should see "Essay 02 new" on quiz page "1"
     And I should see "Essay 03 new" on quiz page "1"

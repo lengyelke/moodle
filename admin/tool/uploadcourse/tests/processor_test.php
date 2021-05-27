@@ -36,13 +36,6 @@ require_once($CFG->libdir . '/csvlib.class.php');
  */
 class tool_uploadcourse_processor_testcase extends advanced_testcase {
 
-    /**
-     * Tidy up open files that may be left open.
-     */
-    protected function tearDown() {
-        gc_collect_cycles();
-    }
-
     public function test_basic() {
         global $DB;
         $this->resetAfterTest(true);
@@ -178,7 +171,7 @@ class tool_uploadcourse_processor_testcase extends advanced_testcase {
         $cir->init();
 
         $options = array('mode' => tool_uploadcourse_processor::MODE_CREATE_NEW);
-        $this->setExpectedException('moodle_exception');
+        $this->expectException(moodle_exception::class);
         $p = new tool_uploadcourse_processor($cir, $options, array());
     }
 
@@ -196,7 +189,7 @@ class tool_uploadcourse_processor_testcase extends advanced_testcase {
         $cir->init();
 
         $options = array('mode' => tool_uploadcourse_processor::MODE_CREATE_NEW);
-        $this->setExpectedException('moodle_exception');
+        $this->expectException(moodle_exception::class);
         $p = new tool_uploadcourse_processor($cir, $options, array());
     }
 

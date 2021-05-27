@@ -1,2 +1,4 @@
-timelimitmin,mod_quiz
-timelimitsec,mod_quiz
+numattemptsmade,mod_quiz
+reviewofattempt,mod_quiz
+reviewofpreview,mod_quiz
+settingsoverrides,mod_quiz

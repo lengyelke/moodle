@@ -24,6 +24,7 @@
 
 $string['addmorechoiceblanks'] = 'Blanks for {no} more choices';
 $string['answer'] = 'Answer';
+$string['blank'] = 'blank';
 $string['correctansweris'] = 'The correct answer is: {$a}';
 $string['infinite'] = 'Unlimited';
 $string['pleaseputananswerineachbox'] = 'Please put an answer in each box.';
@@ -33,3 +34,7 @@ $string['pluginname_link'] = 'question/type/ddwtos';
 $string['pluginnameadding'] = 'Adding a drag and drop into text';
 $string['pluginnameediting'] = 'Editing a drag and drop into text';
 $string['pluginnamesummary'] = 'Missing words in the question text are filled in using drag and drop.';
+$string['privacy:metadata'] = 'Drag and drop into text question type plugin allows question authors to set default options as user preferences.';
+$string['privacy:preference:defaultmark'] = 'The default mark set for a given question.';
+$string['privacy:preference:penalty'] = 'The penalty for each incorrect try when questions are run using the \'Interactive with multiple tries\' or \'Adaptive mode\' behaviour.';
+$string['privacy:preference:shuffleanswers'] = 'Whether the answers should be automatically shuffled.';

@@ -28,8 +28,7 @@
 require_once(__DIR__ . '/../../../lib/behat/behat_base.php');
 require_once(__DIR__ . '/../../../lib/behat/behat_field_manager.php');
 
-use Behat\Behat\Context\Step\Given as Given,
-    Behat\Gherkin\Node\TableNode as TableNode,
+use Behat\Gherkin\Node\TableNode as TableNode,
     Behat\Mink\Exception\ElementNotFoundException as ElementNotFoundException;
 
 /**
@@ -49,73 +48,48 @@ class behat_admin extends behat_base {
      * @param TableNode $table
      */
     public function i_set_the_following_administration_settings_values(TableNode $table) {
-
         if (!$data = $table->getRowsHash()) {
             return;
         }
 
         foreach ($data as $label => $value) {
-
-            // We expect admin block to be visible, otherwise go to homepage.
-            if (!$this->getSession()->getPage()->find('css', '.block_settings')) {
-                $this->getSession()->visit($this->locate_path('/'));
-                $this->wait(self::TIMEOUT * 1000, self::PAGE_READY_JS);
-            }
+            $this->execute('behat_navigation::i_select_from_flat_navigation_drawer', [get_string('administrationsite')]);
 
             // Search by label.
-            $searchbox = $this->find_field(get_string('searchinsettings', 'admin'));
-            $searchbox->setValue($label);
-            $submitsearch = $this->find('css', 'form.adminsearchform input[type=submit]');
-            $submitsearch->press();
-
-            $this->wait(self::TIMEOUT * 1000, self::PAGE_READY_JS);
+            $this->execute('behat_forms::i_set_the_field_to', [get_string('search'), $label]);
+            $this->execute("behat_forms::press_button", get_string('search', 'admin'));
 
             // Admin settings does not use the same DOM structure than other moodle forms
             // but we also need to use lib/behat/form_field/* to deal with the different moodle form elements.
             $exception = new ElementNotFoundException($this->getSession(), '"' . $label . '" administration setting ');
 
             // The argument should be converted to an xpath literal.
-            $label = $this->getSession()->getSelectorsHandler()->xpathLiteral($label);
+            $label = behat_context_helper::escape($label);
 
             // Single element settings.
             try {
-                $fieldxpath = "//*[self::input | self::textarea | self::select][not(./@type = 'submit' or ./@type = 'image' or ./@type = 'hidden')]" .
-                    "[@id=//label[contains(normalize-space(.), $label)]/@for or " .
-                    "@id=//span[contains(normalize-space(.), $label)]/preceding-sibling::label[1]/@for]";
+                $fieldxpath = "//*[self::input | self::textarea | self::select]" .
+                        "[not(./@type = 'submit' or ./@type = 'image' or ./@type = 'hidden')]" .
+                        "[@id=//label[contains(normalize-space(.), $label)]/@for or " .
+                        "@id=//span[contains(normalize-space(.), $label)]/preceding-sibling::label[1]/@for]";
                 $fieldnode = $this->find('xpath', $fieldxpath, $exception);
 
-                $formfieldtypenode = $this->find('xpath', $fieldxpath . "/ancestor::div[@class='form-setting']" .
-                    "/child::div[contains(concat(' ', @class, ' '),  ' form-')]/child::*/parent::div");
-
             } catch (ElementNotFoundException $e) {
-
                 // Multi element settings, interacting only the first one.
-                $fieldxpath = "//*[label[.= $label]|span[.= $label]]/ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' form-item ')]" .
-                    "/descendant::div[@class='form-group']/descendant::*[self::input | self::textarea | self::select][not(./@type = 'submit' or ./@type = 'image' or ./@type = 'hidden')]";
-                $fieldnode = $this->find('xpath', $fieldxpath);
-
-                // It is the same one that contains the type.
-                $formfieldtypenode = $fieldnode;
+                $fieldxpath = "//*[label[contains(., $label)]|span[contains(., $label)]]" .
+                        "/ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' form-item ')]" .
+                        "/descendant::div[contains(concat(' ', @class, ' '), ' form-group ')]" .
+                        "/descendant::*[self::input | self::textarea | self::select]" .
+                        "[not(./@type = 'submit' or ./@type = 'image' or ./@type = 'hidden')]";
             }
 
-            // Getting the class which contains the field type.
-            $classes = explode(' ', $formfieldtypenode->getAttribute('class'));
-            foreach ($classes as $class) {
-                if (substr($class, 0, 5) == 'form-') {
-                    $type = substr($class, 5);
-                }
-            }
-
-            // Instantiating the appropiate field type.
-            $field = behat_field_manager::get_field_instance($type, $fieldnode, $this->getSession());
-            $field->set_value($value);
-
-            $this->find_button(get_string('savechanges'))->press();
+            $this->execute('behat_forms::i_set_the_field_with_xpath_to', [$fieldxpath, $value]);
+            $this->execute("behat_general::i_click_on", [get_string('savechanges'), 'button']);
         }
     }
 
     /**
-     * Sets the specified site settings. A table with | config | value | (optional)plugin | is expected.
+     * Sets the specified site settings. A table with | config | value | (optional)plugin | (optional)encrypted | is expected.
      *
      * @Given /^the following config values are set as admin:$/
      * @param TableNode $table
@@ -129,11 +103,20 @@ class behat_admin extends behat_base {
         foreach ($data as $config => $value) {
             // Default plugin value is null.
             $plugin = null;
+            $encrypted = false;
 
             if (is_array($value)) {
                 $plugin = $value[1];
+                if (array_key_exists(2, $value)) {
+                    $encrypted = $value[2] === 'encrypted';
+                }
                 $value = $value[0];
             }
+
+            if ($encrypted) {
+                $value = \core\encryption::encrypt($value);
+            }
+
             set_config($config, $value, $plugin);
         }
     }

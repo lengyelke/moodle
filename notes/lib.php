@@ -113,6 +113,11 @@ function note_save(&$note) {
     if (empty($note->publishstate)) {
         $note->publishstate = NOTES_STATE_PUBLIC;
     }
+
+    if (empty(trim($note->content))) {
+        // Don't save empty notes.
+        return false;
+    }
     // Save data.
     if (empty($note->id)) {
         // Insert new note.
@@ -383,6 +388,11 @@ function core_notes_myprofile_navigation(core_user\output\myprofile\tree $tree, 
 
     if (empty($CFG->enablenotes)) {
         // Notes are disabled, nothing to do.
+        return false;
+    }
+
+    if (isguestuser($user)) {
+        // No notes for guest users.
         return false;
     }
 

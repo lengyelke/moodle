@@ -19,23 +19,27 @@ Feature: In Dashboard, teacher can see the number of student attempts to lessons
       | student1 | C1 | student |
       | student2 | C1 | student |
     And I log in as "teacher1"
-    And I follow "Course 1"
-    And I turn editing mode on
 
-  @javascript
   Scenario: number of student attempts
-    Given I add a "Lesson" to section "1"
+    Given the following "activity" exists:
+      | activity | lesson                  |
+      | course   | C1                      |
+      | idnumber | 0001                    |
+      | name     | Test lesson name        |
+      | intro    | Test lesson description |
+      | retake   | 1                       |
+      | section  | 1                       |
+    And I am on "Course 1" course homepage
+    And I follow "Test lesson name"
+    When I navigate to "Edit settings" in current page administration
     And I expand all fieldsets
-    And I click on "id_deadline_enabled" "checkbox"
     And I set the following fields to these values:
-      | Name | Test lesson name |
-      | Description | Test lesson description |
+      | id_deadline_enabled | 1 |
       | deadline[day] | 1 |
       | deadline[month] | January |
       | deadline[year] | 2030 |
       | deadline[hour] | 08 |
       | deadline[minute] | 00 |
-      | Re-takes allowed | Yes |
     And I press "Save and return to course"
     And I follow "Test lesson name"
     And I follow "Add a question page"
@@ -51,7 +55,7 @@ Feature: In Dashboard, teacher can see the number of student attempts to lessons
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -80,7 +84,7 @@ Feature: In Dashboard, teacher can see the number of student attempts to lessons
     And I press "Save page"
     And I log out
     And I log in as "student1"
-    And I follow "Course 1"
+    And I am on "Course 1" course homepage
     And I follow "Test lesson name"
     And I should see "Cat is an amphibian"
     And I set the following fields to these values:
@@ -120,7 +124,7 @@ Feature: In Dashboard, teacher can see the number of student attempts to lessons
     And I should see "Your score is 3 (out of 3)."
     And I log out
     And I log in as "student2"
-    And I follow "Course 1"
+    And I am on "Course 1" course homepage
     And I follow "Test lesson name"
     And I should see "Cat is an amphibian"
     And I set the following fields to these values:
@@ -140,8 +144,3 @@ Feature: In Dashboard, teacher can see the number of student attempts to lessons
     And I should see "Congratulations - end of lesson reached"
     And I should see "Your score is 2 (out of 3)."
     And I log out
-    And I log in as "teacher1"
-    When I click on "Dashboard" "link" in the "Navigation" "block"
-    Then I should see "You have lessons that are due"
-    And I click on ".collapsibleregioncaption" "css_element"
-    And I should see "3 attempts"

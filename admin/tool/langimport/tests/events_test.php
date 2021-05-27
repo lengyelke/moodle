@@ -36,7 +36,7 @@ class tool_langimport_events_testcase extends advanced_testcase {
     /**
      * Setup testcase.
      */
-    public function setUp() {
+    public function setUp(): void {
         $this->setAdminUser();
         $this->resetAfterTest();
     }
@@ -57,8 +57,9 @@ class tool_langimport_events_testcase extends advanced_testcase {
     }
 
     public function test_langpack_updated_validation() {
-        $this->setExpectedException('coding_exception', 'The \'langcode\' value must be set to a valid language code');
 
+        $this->expectException('coding_exception');
+        $this->expectExceptionMessage("The 'langcode' value must be set to a valid language code");
         \tool_langimport\event\langpack_updated::event_with_langcode('broken langcode');
     }
 
@@ -76,8 +77,9 @@ class tool_langimport_events_testcase extends advanced_testcase {
     }
 
     public function test_langpack_installed_validation() {
-        $this->setExpectedException('coding_exception', 'The \'langcode\' value must be set to a valid language code');
 
+        $this->expectException('coding_exception');
+        $this->expectExceptionMessage("The 'langcode' value must be set to a valid language code");
         \tool_langimport\event\langpack_imported::event_with_langcode('broken langcode');
     }
 
@@ -95,8 +97,9 @@ class tool_langimport_events_testcase extends advanced_testcase {
     }
 
     public function test_langpack_removed_validation() {
-        $this->setExpectedException('coding_exception', 'The \'langcode\' value must be set to a valid language code');
 
+        $this->expectException('coding_exception');
+        $this->expectExceptionMessage("The 'langcode' value must be set to a valid language code");
         \tool_langimport\event\langpack_removed::event_with_langcode('broken langcode');
     }
 }

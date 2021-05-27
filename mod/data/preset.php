@@ -51,6 +51,7 @@ require_capability('mod/data:managetemplates', $context);
 $PAGE->set_url(new moodle_url('/mod/data/preset.php', array('d'=>$data->id)));
 $PAGE->set_title(get_string('course') . ': ' . $course->fullname);
 $PAGE->set_heading($course->fullname);
+$PAGE->force_settings_menu(true);
 
 // fill in missing properties needed for updating of instance
 $data->course     = $cm->course;
@@ -61,7 +62,8 @@ $presets = data_get_available_presets($context);
 $strdelete = get_string('deleted', 'data');
 foreach ($presets as &$preset) {
     if (!empty($preset->userid)) {
-        $namefields = get_all_user_name_fields(true);
+        $userfieldsapi = \core_user\fields::for_name();
+        $namefields = $userfieldsapi->get_sql('', false, '', '', false)->selects;
         $presetuser = $DB->get_record('user', array('id' => $preset->userid), 'id, ' . $namefields, MUST_EXIST);
         $preset->description = $preset->name.' ('.fullname($presetuser, true).')';
     } else {
@@ -69,13 +71,13 @@ foreach ($presets as &$preset) {
         $preset->description = $preset->name;
         if (data_user_can_delete_preset($context, $preset) && $preset->name != 'Image gallery') {
             $delurl = new moodle_url('/mod/data/preset.php', array('d'=> $data->id, 'action'=>'confirmdelete', 'fullname'=>$preset->userid.'/'.$preset->shortname, 'sesskey'=>sesskey()));
-            $delicon = html_writer::empty_tag('img', array('src'=>$OUTPUT->pix_url('t/delete'), 'class'=>'iconsmall', 'alt'=>$strdelete.' '.$preset->description));
+            $delicon = $OUTPUT->pix_icon('t/delete', $strdelete . ' ' . $preset->description);
             $preset->description .= html_writer::link($delurl, $delicon);
         }
     }
     if ($preset->userid > 0 && data_user_can_delete_preset($context, $preset)) {
         $delurl = new moodle_url('/mod/data/preset.php', array('d'=> $data->id, 'action'=>'confirmdelete', 'fullname'=>$preset->userid.'/'.$preset->shortname, 'sesskey'=>sesskey()));
-        $delicon = html_writer::empty_tag('img', array('src'=>$OUTPUT->pix_url('t/delete'), 'class'=>'iconsmall', 'alt'=>$strdelete.' '.$preset->description));
+        $delicon = $OUTPUT->pix_icon('t/delete', $strdelete . ' ' . $preset->description);
         $preset->description .= html_writer::link($delurl, $delicon);
     }
 }
@@ -99,6 +101,12 @@ $form_save->set_data(array('d' => $data->id, 'name'=>$data->name));
 if (!$form_export->is_submitted()) {
     echo $OUTPUT->header();
     echo $OUTPUT->heading(format_string($data->name), 2);
+
+    // Render the activity information.
+    $cminfo = cm_info::create($cm);
+    $completiondetails = \core_completion\cm_completion_details::get_instance($cminfo, $USER->id);
+    $activitydates = \core\activity_dates::get_dates_for_module($cminfo, $USER->id);
+    echo $OUTPUT->activity_information($cminfo, $completiondetails, $activitydates);
 
     // Needed for tabs.php
     $currenttab = 'presets';
@@ -139,6 +147,10 @@ if (optional_param('sesskey', false, PARAM_BOOL) && confirm_sesskey()) {
         header('Expires: 0');
         header('Cache-Control: must-revalidate,post-check=0,pre-check=0');
         header('Pragma: public');
+
+        // If this file was requested from a form, then mark download as complete.
+        \core_form\util::form_download_complete();
+
         $exportfilehandler = fopen($exportfile, 'rb');
         print fread($exportfilehandler, filesize($exportfile));
         fclose($exportfilehandler);

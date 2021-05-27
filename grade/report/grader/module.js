@@ -444,6 +444,7 @@ M.gradereport_grader.classes.ajax.prototype.submit = function(properties, values
     }
     // If feedback is editable and has changed add to the IO queue for it
     if (values.editablefeedback && values.feedback !== values.oldfeedback) {
+        values.feedback = encodeURIComponent(values.feedback);
         this.pendingsubmissions.push({transaction:this.report.Y.io.queue(M.cfg.wwwroot+'/grade/report/grader/ajax_callbacks.php', {
             method : 'POST',
             data : 'id='+this.courseid+'&userid='+properties.userid+'&itemid='+properties.itemid+'&action=update&newvalue='+values.feedback+'&type=feedback&sesskey='+M.cfg.sesskey,
@@ -568,7 +569,7 @@ M.gradereport_grader.classes.ajax.prototype.submission_outcome = function(tid, o
         var p = args.properties;
         if (args.type == 'grade') {
             var oldgrade = args.values.oldgrade;
-            p.cell.one('.gradevalue').set('innerHTML',oldgrade);
+            p.cell.one('input.text').set('value', oldgrade);
         } else if (args.type == 'feedback') {
             this.report.update_feedback(p.userid, p.itemid, args.values.oldfeedback);
         }

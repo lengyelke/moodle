@@ -12,7 +12,7 @@ Feature: Add cohorts of users
       | user3 | Third | User | third@example.com |
       | user4 | Forth | User | forth@example.com |
     And I log in as "admin"
-    And I navigate to "Cohorts" node in "Site administration > Users > Accounts"
+    And I navigate to "Users > Accounts >Cohorts" in site administration
     And I follow "Add new cohort"
     And I set the following fields to these values:
       | Name | Test cohort name |
@@ -34,14 +34,15 @@ Feature: Add cohorts of users
     When I add "First User (first@example.com)" user to "333" cohort members
     And I add "Second User (second@example.com)" user to "333" cohort members
     Then I should see "2" in the "#cohorts" "css_element"
-    And I follow "Assign"
+    And I click on "Assign" "link" in the "Test cohort name" "table_row"
     And the "Current users" select box should contain "First User (first@example.com)"
     And the "Current users" select box should contain "Second User (second@example.com)"
     And the "Current users" select box should not contain "Forth User (forth@example.com)"
 
   @javascript
   Scenario: Add users to a cohort using a bulk user action
-    When I follow "Bulk user actions"
+    When I follow "Accounts"
+    And I follow "Bulk user actions"
     And I set the field "Available" to "Third User"
     And I press "Add to selection"
     And I set the field "Available" to "Forth User"
@@ -50,9 +51,19 @@ Feature: Add cohorts of users
     And I press "Go"
     And I set the field "Cohort" to "Test cohort name [333]"
     And I press "Add to cohort"
+    And I follow "Accounts"
     And I follow "Cohorts"
     Then I should see "2" in the "#cohorts" "css_element"
-    And I follow "Assign"
+    And I click on "Assign" "link" in the "Test cohort name" "table_row"
     And the "Current users" select box should contain "Third User (third@example.com)"
     And the "Current users" select box should contain "Forth User (forth@example.com)"
     And the "Current users" select box should not contain "First User (first@example.com)"
+
+  @javascript
+  Scenario: Edit cohort name in-place
+    When I follow "Cohorts"
+    And I set the field "Edit cohort name" to "Students cohort"
+    Then I should not see "Test cohort name"
+    And I should see "Students cohort"
+    And I follow "Cohorts"
+    And I should see "Students cohort"

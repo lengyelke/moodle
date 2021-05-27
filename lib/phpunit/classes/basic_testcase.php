@@ -57,12 +57,20 @@ abstract class basic_testcase extends base_testcase {
      * Runs the bare test sequence and log any changes in global state or database.
      * @return void
      */
-    final public function runBare() {
+    final public function runBare(): void {
         global $DB;
 
         try {
             parent::runBare();
-        } catch (Exception $e) {
+
+        } catch (Exception $ex) {
+            $e = $ex;
+        } catch (Throwable $ex) {
+            // Engine errors in PHP7 throw exceptions of type Throwable (this "catch" will be ignored in PHP5).
+            $e = $ex;
+        }
+
+        if (isset($e)) {
             // cleanup after failed expectation
             phpunit_util::reset_all_data();
             throw $e;

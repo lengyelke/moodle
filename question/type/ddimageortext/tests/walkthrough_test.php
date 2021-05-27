@@ -46,8 +46,7 @@ class qtype_ddimageortext_walkthrough_test extends qbehaviour_walkthrough_test_b
      * @return question_contains_tag_with_attributes the required expectation.
      */
     protected function get_contains_drag_image_home_expectation($dragitemno, $choice, $group) {
-        $class = 'group' . $group;
-        $class .= ' draghome dragitemhomes' . $dragitemno. ' choice'.$choice.' yui3-cssfonts';
+        $class = 'group' . $group . ' draghome choice' . $choice;
 
         $expectedattrs = array();
         $expectedattrs['class'] = $class;
@@ -180,7 +179,7 @@ class qtype_ddimageortext_walkthrough_test extends qbehaviour_walkthrough_test_b
                 $this->quba->get_field_prefix($this->slot) . 'p3', '1'),
             $this->get_contains_hidden_expectation(
                 $this->quba->get_field_prefix($this->slot) . 'p4', '2'),
-            $this->get_contains_submit_button_expectation(false),
+            $this->get_does_not_contain_submit_button_expectation(),
             $this->get_contains_correct_expectation(),
             $this->get_no_hint_visible_expectation());
 
@@ -469,7 +468,7 @@ class qtype_ddimageortext_walkthrough_test extends qbehaviour_walkthrough_test_b
             $this->get_contains_drag_image_home_expectation(2, 2, 1),
             $this->get_contains_drag_image_home_expectation(3, 1, 2),
             $this->get_contains_drag_image_home_expectation(4, 2, 2),
-            $this->get_contains_submit_button_expectation(false),
+            $this->get_does_not_contain_submit_button_expectation(),
             $this->get_contains_try_again_button_expectation(true),
             $this->get_does_not_contain_correctness_expectation(),
             $this->get_contains_hint_expectation('This is the first hint'),
@@ -530,7 +529,7 @@ class qtype_ddimageortext_walkthrough_test extends qbehaviour_walkthrough_test_b
             $this->get_contains_drag_image_home_expectation(2, 2, 1),
             $this->get_contains_drag_image_home_expectation(3, 1, 2),
             $this->get_contains_drag_image_home_expectation(4, 2, 2),
-            $this->get_contains_submit_button_expectation(false),
+            $this->get_does_not_contain_submit_button_expectation(),
             $this->get_contains_try_again_button_expectation(true),
             $this->get_does_not_contain_correctness_expectation(),
             $this->get_contains_hint_expectation('This is the second hint'),
@@ -592,7 +591,7 @@ class qtype_ddimageortext_walkthrough_test extends qbehaviour_walkthrough_test_b
                 $this->quba->get_field_prefix($this->slot) . 'p3', 1),
             $this->get_contains_hidden_expectation(
                 $this->quba->get_field_prefix($this->slot) . 'p4', 2),
-            $this->get_contains_submit_button_expectation(false),
+            $this->get_does_not_contain_submit_button_expectation(),
             $this->get_does_not_contain_try_again_button_expectation(),
             $this->get_contains_correct_expectation(),
             $this->get_no_hint_visible_expectation(),
@@ -648,7 +647,7 @@ class qtype_ddimageortext_walkthrough_test extends qbehaviour_walkthrough_test_b
             $this->get_contains_drag_image_home_expectation(2, 2, 1),
             $this->get_contains_drag_image_home_expectation(3, 1, 2),
             $this->get_contains_drag_image_home_expectation(4, 2, 2),
-            $this->get_contains_submit_button_expectation(false),
+            $this->get_does_not_contain_submit_button_expectation(),
             $this->get_contains_correct_expectation(),
             $this->get_no_hint_visible_expectation());
 
@@ -710,7 +709,7 @@ class qtype_ddimageortext_walkthrough_test extends qbehaviour_walkthrough_test_b
             $this->get_contains_drag_image_home_expectation(2, 2, 1),
             $this->get_contains_drag_image_home_expectation(3, 1, 2),
             $this->get_contains_drag_image_home_expectation(4, 2, 2),
-            $this->get_contains_submit_button_expectation(false),
+            $this->get_does_not_contain_submit_button_expectation(),
             $this->get_contains_partcorrect_expectation(),
             $this->get_no_hint_visible_expectation());
 
@@ -769,7 +768,7 @@ class qtype_ddimageortext_walkthrough_test extends qbehaviour_walkthrough_test_b
             $this->get_contains_drag_image_home_expectation(2, 2, 1),
             $this->get_contains_drag_image_home_expectation(3, 1, 2),
             $this->get_contains_drag_image_home_expectation(4, 2, 2),
-            $this->get_contains_submit_button_expectation(false),
+            $this->get_does_not_contain_submit_button_expectation(),
             $this->get_contains_hint_expectation('This is the first hint'));
 
         // Do try again.
@@ -854,5 +853,21 @@ class qtype_ddimageortext_walkthrough_test extends qbehaviour_walkthrough_test_b
             $dd->get_right_answer_summary());
         $this->check_current_state(question_state::$gradedright);
         $this->check_current_mark(3);
+    }
+
+    public function test_mixed_lang_rendering() {
+
+        // Create a mixe drag-and-drop question.
+        $dd = test_question_maker::make_question('ddimageortext', 'mixedlang');
+        $dd->shufflechoices = false;
+        $this->start_attempt_at_question($dd, 'interactive', 1);
+
+        // Check the initial state.
+        $this->check_current_state(question_state::$todo);
+        $this->check_current_mark(null);
+        $this->check_current_output(
+                new question_pattern_expectation('~<div class="group1 draghome choice1"><span lang="fr">la</span></div>~'),
+                new question_pattern_expectation('~<div class="group1 draghome choice2"><span lang="fr">ma</span></div>~')
+        );
     }
 }

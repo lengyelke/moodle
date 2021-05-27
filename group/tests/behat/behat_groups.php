@@ -27,7 +27,6 @@
 
 require_once(__DIR__ . '/../../../lib/behat/behat_base.php');
 
-use Behat\Behat\Context\Step\Then;
 use Behat\Mink\Exception\ElementNotFoundException as ElementNotFoundException;
 
 /**
@@ -49,40 +48,20 @@ class behat_groups extends behat_base {
      * @param string $groupname
      */
     public function i_add_user_to_group_members($userfullname, $groupname) {
+        // Select the group in the select.
+        $this->execute('behat_forms::i_set_the_field_to', [get_string('groups', 'core'), $this->escape($groupname)]);
 
-        $userfullname = $this->getSession()->getSelectorsHandler()->xpathLiteral($userfullname);
+        // Press "Add/remove users".
+        $this->execute('behat_general::i_click_on', [get_string('adduserstogroup', 'group'), "button"]);
 
-        // Using a xpath liternal to avoid problems with quotes and double quotes.
-        $groupname = $this->getSession()->getSelectorsHandler()->xpathLiteral($groupname);
-
-        // We don't know the option text as it contains the number of users in the group.
-        $select = $this->find_field('groups');
-        $xpath = "//select[@id='groups']/descendant::option[contains(., $groupname)]";
-        $groupoption = $this->find('xpath', $xpath);
-        $fulloption = $groupoption->getText();
-        $select->selectOption($fulloption);
-
-        // Here we don't need to wait for the AJAX response.
-        $this->find_button(get_string('adduserstogroup', 'group'))->click();
-
-        // Wait for add/remove members page to be loaded.
-        $this->getSession()->wait(self::TIMEOUT * 1000, self::PAGE_READY_JS);
-
-        // Getting the option and selecting it.
-        $select = $this->find_field('addselect');
-        $xpath = "//select[@id='addselect']/descendant::option[contains(., $userfullname)]";
-        $memberoption = $this->find('xpath', $xpath);
-        $fulloption = $memberoption->getText();
-        $select->selectOption($fulloption);
+        // Select the user.
+        $this->execute('behat_forms::i_set_the_field_to', ["addselect", $this->escape($userfullname)]);
 
         // Click add button.
-        $this->find_button(get_string('add'))->click();
-
-        // Wait for the page to load.
-        $this->getSession()->wait(self::TIMEOUT * 1000, self::PAGE_READY_JS);
+        $this->execute('behat_general::i_click_on', [get_string('add', 'core'), "button"]);
 
         // Returning to the main groups page.
-        $this->find_button(get_string('backtogroups', 'group'))->click();
+        $this->execute('behat_general::i_click_on', [get_string('backtogroups', 'group'), "button"]);
     }
 
     /**
@@ -91,11 +70,9 @@ class behat_groups extends behat_base {
      * @Given /^the group overview should include groups "(?P<groups_string>(?:[^"]|\\")*)" in grouping "(?P<grouping_string>(?:[^"]|\\")*)"$/
      * @param string $groups one or comma seperated list of groups.
      * @param string $grouping grouping in which all group should be present.
-     * @return Then[]
      */
     public function the_groups_overview_should_include_groups_in_grouping($groups, $grouping) {
 
-        $steps = array();
         $groups = array_map('trim', explode(',', $groups));
 
         foreach ($groups as $groupname) {
@@ -103,9 +80,7 @@ class behat_groups extends behat_base {
             $xpath = "//h3[normalize-space(.) = '{$grouping}']/following-sibling::table//tr//".
                 "td[contains(concat(' ', normalize-space(@class), ' '), ' c0 ')][normalize-space(.) = '{$groupname}' ]";
 
-            $steps[] = new Then('"'.$xpath.'" "xpath_element" should exist');
+            $this->execute('behat_general::should_exist', array($xpath, 'xpath_element'));
         }
-
-        return $steps;
     }
 }

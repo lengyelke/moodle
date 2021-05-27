@@ -201,10 +201,6 @@ class core_modinfolib_testcase extends advanced_testcase {
         $this->assertEquals(new moodle_url('/mod/assign/view.php', array('id' => $moduledb->id)), $cm->url);
         $this->assertEquals($cachedcminfo->customdata, $cm->customdata);
 
-        // Deprecated field.
-        $this->assertEquals(0, $cm->groupmembersonly);
-        $this->assertDebuggingCalled();
-
         // Dynamic fields, just test that they can be retrieved (must be carefully tested in each activity type).
         $this->assertNotEmpty($cm->availableinfo); // Lists all unmet availability conditions.
         $this->assertEquals(0, $cm->uservisible);
@@ -382,10 +378,12 @@ class core_modinfolib_testcase extends advanced_testcase {
         $this->assertEquals('', $modinfo->get_section_info(2)->sequence);
         $this->assertEquals($page3->cmid, $modinfo->get_section_info(3)->sequence);
         $this->assertEquals($course->id, $modinfo->get_course()->id);
-        $this->assertEquals(array('assign', 'forum', 'page'),
-                array_keys($modinfo->get_used_module_names()));
-        $this->assertEquals(array('assign', 'forum', 'page'),
-                array_keys($modinfo->get_used_module_names(true)));
+        $names = array_keys($modinfo->get_used_module_names());
+        sort($names);
+        $this->assertEquals(array('assign', 'forum', 'page'), $names);
+        $names = array_keys($modinfo->get_used_module_names(true));
+        sort($names);
+        $this->assertEquals(array('assign', 'forum', 'page'), $names);
         // Admin can see hidden modules/sections.
         $this->assertTrue($modinfo->cms[$assign0->cmid]->uservisible);
         $this->assertTrue($modinfo->get_section_info(3)->uservisible);
@@ -471,50 +469,13 @@ class core_modinfolib_testcase extends advanced_testcase {
     }
 
     /**
-     * Tests that various deprecated cm_info methods are throwing debuggign messages
-     */
-    public function test_cm_info_property_deprecations() {
-        global $DB, $CFG;
-
-        $this->resetAfterTest();
-
-        $course = $this->getDataGenerator()->create_course( array('format' => 'topics', 'numsections' => 3),
-                array('createsections' => true));
-        $forum = $this->getDataGenerator()->create_module('forum', array('course' => $course->id));
-        $cm = get_fast_modinfo($course->id)->instances['forum'][$forum->id];
-
-        $cm->get_url();
-        $this->assertDebuggingCalled('cm_info::get_url() is deprecated, please use the property cm_info->url instead.');
-
-        $cm->get_content();
-        $this->assertDebuggingCalled('cm_info::get_content() is deprecated, please use the property cm_info->content instead.');
-
-        $cm->get_extra_classes();
-        $this->assertDebuggingCalled('cm_info::get_extra_classes() is deprecated, please use the property cm_info->extraclasses instead.');
-
-        $cm->get_on_click();
-        $this->assertDebuggingCalled('cm_info::get_on_click() is deprecated, please use the property cm_info->onclick instead.');
-
-        $cm->get_custom_data();
-        $this->assertDebuggingCalled('cm_info::get_custom_data() is deprecated, please use the property cm_info->customdata instead.');
-
-        $cm->get_after_link();
-        $this->assertDebuggingCalled('cm_info::get_after_link() is deprecated, please use the property cm_info->afterlink instead.');
-
-        $cm->get_after_edit_icons();
-        $this->assertDebuggingCalled('cm_info::get_after_edit_icons() is deprecated, please use the property cm_info->afterediticons instead.');
-
-        $cm->obtain_dynamic_data();
-        $this->assertDebuggingCalled('cm_info::obtain_dynamic_data() is deprecated and should not be used.');
-    }
-
-    /**
      * Tests for function cm_info::get_course_module_record()
      */
     public function test_cm_info_get_course_module_record() {
-        global $DB, $CFG;
+        global $DB;
 
         $this->resetAfterTest();
+        $this->setAdminUser();
 
         set_config('enableavailability', 1);
         set_config('enablecompletion', 1);
@@ -845,7 +806,7 @@ class core_modinfolib_testcase extends advanced_testcase {
             get_course_and_cm_from_cmid($page->cmid, 'pigs can fly');
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('Invalid modulename parameter', $e->getMessage());
+            $this->assertStringContainsString('Invalid modulename parameter', $e->getMessage());
         }
 
         // Doesn't exist.
@@ -934,7 +895,7 @@ class core_modinfolib_testcase extends advanced_testcase {
             get_course_and_cm_from_cmid($page->cmid, '1337 h4x0ring');
             $this->fail();
         } catch (coding_exception $e) {
-            $this->assertContains('Invalid modulename parameter', $e->getMessage());
+            $this->assertStringContainsString('Invalid modulename parameter', $e->getMessage());
         }
 
         // Create a second hidden activity.

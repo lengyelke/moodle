@@ -29,6 +29,8 @@ require_once(__DIR__.'/fixtures/event_fixtures.php');
 
 class core_event_testcase extends advanced_testcase {
 
+    const DEBUGGING_MSG = 'Events API using $handlers array has been deprecated in favour of Events 2 API, please use it instead.';
+
     public function test_event_properties() {
         global $USER;
 
@@ -590,9 +592,12 @@ class core_event_testcase extends advanced_testcase {
         );
 
         $DB->delete_records('log', array());
+        $this->expectException('coding_exception');
         events_update_definition('unittest');
+
         $DB->delete_records_select('events_handlers', "component <> 'unittest'");
-        events_get_handlers('reset');
+
+        $this->assertDebuggingCalled(self::DEBUGGING_MSG, DEBUG_DEVELOPER);
         $this->assertEquals(3, $DB->count_records('events_handlers'));
         set_config('loglifetime', 60*60*24*5);
 
@@ -607,12 +612,11 @@ class core_event_testcase extends advanced_testcase {
         $event2->trigger();
 
         $this->assertSame(
-            array('observe_all-5', 'observe_one-5', 'legacy_handler-0', 'observe_all-nesting-6', 'legacy_handler-0', 'observe_one-6', 'observe_all-666', 'observe_one-666', 'legacy_handler-0'),
+            array('observe_all-5', 'observe_one-5', 'observe_all-nesting-6', 'observe_one-6', 'observe_all-666', 'observe_one-666'),
             \core_tests\event\unittest_observer::$info);
 
         $this->assertSame($event1, \core_tests\event\unittest_observer::$event[0]);
         $this->assertSame($event1, \core_tests\event\unittest_observer::$event[1]);
-        $this->assertSame(array(0, 5), \core_tests\event\unittest_observer::$event[2]);
 
         $logs = $DB->get_records('log', array(), 'id ASC');
         $this->assertCount(0, $logs);
@@ -845,10 +849,19 @@ class core_event_testcase extends advanced_testcase {
         $this->assertSame($event->get_data(), $data);
     }
 
-    /**
-     * @expectedException PHPUnit_Framework_Error_Notice
-     */
     public function test_context_not_used() {
+        // TODO: MDL-69688 - This test is far away from my understanding. It throws a
+        // "Trying to get property 'instanceid' of non-object" notice, so
+        // it's not clear for me what the test is doing. This was detected
+        // when preparing tests for PHPUnit 8 (MDL-67673) and, at the end
+        // all that was done is to move the annotation (deprecated) to
+        // explicit expectation. Still try commenting it out and you'll see
+        // the notice.
+        if (PHP_VERSION_ID >= 80000) {
+            $this->expectWarning();
+        } else {
+            $this->expectNotice();
+        }
         $event = \core_tests\event\context_used_in_event::create(array('other' => array('sample' => 1, 'xx' => 10)));
         $this->assertEventContextNotUsed($event);
 
@@ -865,17 +878,23 @@ class core_event_testcase extends advanced_testcase {
         $observers = \core\event\manager::get_all_observers();
 
         // Expected information from the workshop allocation scheduled observer.
-        $expected = array();
-        $observer = new stdClass();
-        $observer->callable = '\workshopallocation_scheduled\observer::workshop_viewed';
-        $observer->priority = 0;
-        $observer->internal = true;
-        $observer->includefile = null;
-        $observer->plugintype = 'workshopallocation';
-        $observer->plugin = 'scheduled';
-        $expected[0] = $observer;
+        $expected = new stdClass();
+        $expected->callable = '\workshopallocation_scheduled\observer::workshop_viewed';
+        $expected->priority = 0;
+        $expected->internal = true;
+        $expected->includefile = null;
+        $expected->plugintype = 'workshopallocation';
+        $expected->plugin = 'scheduled';
 
-        $this->assertEquals($expected, $observers['\mod_workshop\event\course_module_viewed']);
+        // May be more than one observer for the mod_workshop event.
+        $found = false;
+        foreach ($observers['\mod_workshop\event\course_module_viewed'] as $observer) {
+            if ($expected == $observer) {
+                $found = true;
+                break;
+            }
+        }
+        $this->assertTrue($found);
     }
 
     /**

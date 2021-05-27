@@ -25,6 +25,7 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+require_once($CFG->dirroot . '/question/type/questionbase.php');
 
 /**
  * Represents a matching question.
@@ -45,6 +46,8 @@ class qtype_match_question extends question_graded_automatically_with_countback 
 
     /** @var array of question stems. */
     public $stems;
+    /** @var int[] FORMAT_... type for each stem. */
+    public $stemformat;
     /** @var array of choices that can be matched to each stem. */
     public $choices;
     /** @var array index of the right choice for each stem. */
@@ -341,7 +344,7 @@ class qtype_match_question extends question_graded_automatically_with_countback 
 
         } else if ($component == 'question' && in_array($filearea,
                 array('correctfeedback', 'partiallycorrectfeedback', 'incorrectfeedback'))) {
-            return $this->check_combined_feedback_file_access($qa, $options, $filearea);
+            return $this->check_combined_feedback_file_access($qa, $options, $filearea, $args);
 
         } else if ($component == 'question' && $filearea == 'hint') {
             return $this->check_hint_file_access($qa, $options, $args);
@@ -350,5 +353,22 @@ class qtype_match_question extends question_graded_automatically_with_countback 
             return parent::check_file_access($qa, $options, $component, $filearea,
                     $args, $forcedownload);
         }
+    }
+
+    /**
+     * Return the question settings that define this question as structured data.
+     *
+     * @param question_attempt $qa the current attempt for which we are exporting the settings.
+     * @param question_display_options $options the question display options which say which aspects of the question
+     * should be visible.
+     * @return mixed structure representing the question settings. In web services, this will be JSON-encoded.
+     */
+    public function get_question_definition_for_external_rendering(question_attempt $qa, question_display_options $options) {
+        // This is a partial implementation, returning only the most relevant question settings for now,
+        // ideally, we should return as much as settings as possible (depending on the state and display options).
+
+        return [
+            'shufflestems' => $this->shufflestems,
+        ];
     }
 }

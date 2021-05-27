@@ -62,15 +62,24 @@ $PAGE->requires->string_for_js('show', 'moodle');
 $PAGE->set_title($course->shortname.': '.$imscp->name);
 $PAGE->set_heading($course->fullname);
 $PAGE->set_activity_record($imscp);
-echo $OUTPUT->header();
-echo $OUTPUT->heading(format_string($imscp->name));
 
 // Verify imsmanifest was parsed properly.
 if (!$imscp->structure) {
-    echo $OUTPUT->notification(get_string('deploymenterror', 'imscp'), 'notifyproblem');
-    echo $OUTPUT->continue_button(course_get_url($course->id, $cm->section));
-    echo $OUTPUT->footer();
-    die;
+    redirect(course_get_url($course->id, $cm->section), get_string('deploymenterror', 'imscp'));
+}
+
+echo $OUTPUT->header();
+echo $OUTPUT->heading(format_string($imscp->name));
+
+// Render the activity information.
+$cminfo = cm_info::create($cm);
+$completiondetails = \core_completion\cm_completion_details::get_instance($cminfo, $USER->id);
+$activitydates = \core\activity_dates::get_dates_for_module($cminfo, $USER->id);
+echo $OUTPUT->activity_information($cminfo, $completiondetails, $activitydates);
+
+// Info box.
+if ($imscp->intro) {
+    echo $OUTPUT->box(format_module_intro('imscp', $imscp, $cm->id), 'generalbox', 'intro');
 }
 
 imscp_print_content($imscp, $cm, $course);

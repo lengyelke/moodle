@@ -46,6 +46,7 @@ if (!empty($id)) {
 } else {
     print_error('invalidid', 'glossary');
 }
+$cm = cm_info::create($cm);
 
 require_course_login($course->id, true, $cm);
 $context = context_module::instance($cm->id);
@@ -68,9 +69,13 @@ if ( !$entriesbypage = $glossary->entbypage ) {
     $entriesbypage = $CFG->glossary_entbypage;
 }
 
-/// If we have received a page, recalculate offset
-if ($page != 0 && $offset == 0) {
+// If we have received a page, recalculate offset and page size.
+$pagelimit = $entriesbypage;
+if ($page > 0 && $offset == 0) {
     $offset = $page * $entriesbypage;
+} else if ($page < 0) {
+    $offset = 0;
+    $pagelimit = 0;
 }
 
 /// setting the default values for the display mode of the current glossary
@@ -255,19 +260,7 @@ break;
 }
 
 // Trigger module viewed event.
-$event = \mod_glossary\event\course_module_viewed::create(array(
-    'objectid' => $glossary->id,
-    'context' => $context,
-    'other' => array('mode' => $mode)
-));
-$event->add_record_snapshot('course', $course);
-$event->add_record_snapshot('course_modules', $cm);
-$event->add_record_snapshot('glossary', $glossary);
-$event->trigger();
-
-// Mark as viewed
-$completion = new completion_info($course);
-$completion->set_module_viewed($cm);
+glossary_view($glossary, $course, $cm, $context, $mode);
 
 /// Printing the heading
 $strglossaries = get_string("modulenameplural", "glossary");
@@ -287,6 +280,7 @@ if (isset($mode)) {
     $url->param('mode', $mode);
 }
 $PAGE->set_url($url);
+$PAGE->force_settings_menu();
 
 if (!empty($CFG->enablerssfeeds) && !empty($CFG->glossary_enablerssfeeds)
     && $glossary->rsstype && $glossary->rssarticles) {
@@ -304,6 +298,11 @@ if ($tab == GLOSSARY_APPROVAL_VIEW) {
     echo $OUTPUT->header();
 }
 echo $OUTPUT->heading(format_string($glossary->name), 2);
+
+// Render the activity information.
+$completiondetails = \core_completion\cm_completion_details::get_instance($cm, $USER->id);
+$activitydates = \core\activity_dates::get_dates_for_module($cm, $USER->id);
+echo $OUTPUT->activity_information($cm, $completiondetails, $activitydates);
 
 /// All this depends if whe have $showcommonelements
 if ($showcommonelements) {
@@ -355,12 +354,27 @@ if ($showcommonelements) {
 /// The print icon
     if ( $showcommonelements and $mode != 'search') {
         if (has_capability('mod/glossary:manageentries', $context) or $glossary->allowprintview) {
-            echo " <a class='printicon' title =\"". get_string("printerfriendly","glossary") ."\" href=\"print.php?id=$cm->id&amp;mode=$mode&amp;hook=".urlencode($hook)."&amp;sortkey=$sortkey&amp;sortorder=$sortorder&amp;offset=$offset\">" . get_string("printerfriendly","glossary")."</a>";
+            $params = array(
+                'id'        => $cm->id,
+                'mode'      => $mode,
+                'hook'      => $hook,
+                'sortkey'   => $sortkey,
+                'sortorder' => $sortorder,
+                'offset'    => $offset,
+                'pagelimit' => $pagelimit
+            );
+            $printurl = new moodle_url('/mod/glossary/print.php', $params);
+            $printtitle = get_string('printerfriendly', 'glossary');
+            $printattributes = array(
+                'class' => 'printicon',
+                'title' => $printtitle
+            );
+            echo html_writer::link($printurl, $printtitle, $printattributes);
         }
     }
 /// End glossary controls
 //        print_box_end(); /// glossarycontrol
-    echo '</div>';
+    echo '</div><br />';
 
 //        print_box('&nbsp;', 'clearer');
 }
@@ -372,46 +386,49 @@ if ($glossary->intro && $showcommonelements) {
 
 /// Search box
 if ($showcommonelements ) {
-    echo '<form method="post" action="view.php">';
-
-    echo '<table class="boxaligncenter" width="70%" border="0">';
-    echo '<tr><td align="center" class="glossarysearchbox">';
-
-    echo '<input type="submit" value="'.$strsearch.'" name="searchbutton" /> ';
-    if ($mode == 'search') {
-        echo '<input type="text" name="hook" size="20" value="'.s($hook).'" alt="'.$strsearch.'" /> ';
-    } else {
-        echo '<input type="text" name="hook" size="20" value="" alt="'.$strsearch.'" /> ';
-    }
+    $fullsearchchecked = false;
     if ($fullsearch || $mode != 'search') {
-        $fullsearchchecked = 'checked="checked"';
-    } else {
-        $fullsearchchecked = '';
+        $fullsearchchecked = true;
     }
-    echo '<input type="checkbox" name="fullsearch" id="fullsearch" value="1" '.$fullsearchchecked.' />';
-    echo '<input type="hidden" name="mode" value="search" />';
-    echo '<input type="hidden" name="id" value="'.$cm->id.'" />';
-    echo '<label for="fullsearch">'.$strsearchindefinition.'</label>';
-    echo '</td></tr></table>';
 
-    echo '</form>';
+    $check = [
+        'name' => 'fullsearch',
+        'id' => 'fullsearch',
+        'value' => '1',
+        'checked' => $fullsearchchecked,
+        'label' => $strsearchindefinition
+    ];
 
-    echo '<br />';
+    $checkbox = $OUTPUT->render_from_template('core/checkbox', $check);
+
+    $hiddenfields = [
+        (object) ['name' => 'id', 'value' => $cm->id],
+        (object) ['name' => 'mode', 'value' => 'search'],
+    ];
+    $data = [
+        'action' => new moodle_url('/mod/glossary/view.php'),
+        'hiddenfields' => $hiddenfields,
+        'otherfields' => $checkbox,
+        'inputname' => 'hook',
+        'query' => ($mode == 'search') ? s($hook) : '',
+        'searchstring' => get_string('search'),
+        'extraclasses' => 'my-2'
+    ];
+    echo $OUTPUT->render_from_template('core/search_input', $data);
 }
 
 /// Show the add entry button if allowed
 if (has_capability('mod/glossary:write', $context) && $showcommonelements ) {
     echo '<div class="singlebutton glossaryaddentry">';
-    echo "<form id=\"newentryform\" method=\"get\" action=\"$CFG->wwwroot/mod/glossary/edit.php\">";
+    echo "<form class=\"form form-inline mb-1\" id=\"newentryform\" method=\"get\" action=\"$CFG->wwwroot/mod/glossary/edit.php\">";
     echo '<div>';
     echo "<input type=\"hidden\" name=\"cmid\" value=\"$cm->id\" />";
-    echo '<input type="submit" value="'.get_string('addentry', 'glossary').'" />';
+    echo '<input type="submit" value="'.get_string('addentry', 'glossary').'" class="btn btn-secondary" />';
     echo '</div>';
     echo '</form>';
     echo "</div>\n";
 }
 
-echo '<br />';
 
 require("tabs.php");
 
@@ -431,7 +448,10 @@ if ($allentries) {
     }
 
     //Build paging bar
-    $paging = glossary_get_paging_bar($count, $page, $entriesbypage, "view.php?id=$id&amp;mode=$mode&amp;hook=".urlencode($hook)."&amp;sortkey=$sortkey&amp;sortorder=$sortorder&amp;fullsearch=$fullsearch&amp;",9999,10,'&nbsp;&nbsp;', $specialtext, -1);
+    $baseurl = new moodle_url('/mod/glossary/view.php', ['id' => $id, 'mode' => $mode, 'hook' => $hook,
+        'sortkey' => $sortkey, 'sortorder' => $sortorder, 'fullsearch' => $fullsearch]);
+    $paging = glossary_get_paging_bar($count, $page, $entriesbypage, $baseurl->out() . '&amp;',
+        9999, 10, '&nbsp;&nbsp;', $specialtext, -1);
 
     echo '<div class="paging">';
     echo $paging;
@@ -459,31 +479,31 @@ if ($allentries) {
     foreach ($allentries as $entry) {
 
         // Setting the pivot for the current entry
-        $pivot = $entry->glossarypivot;
-        $upperpivot = core_text::strtoupper($pivot);
-        $pivottoshow = core_text::strtoupper(format_string($pivot, true, $fmtoptions));
-        // Reduce pivot to 1cc if necessary
-        if ( !$fullpivot ) {
-            $upperpivot = core_text::substr($upperpivot, 0, 1);
-            $pivottoshow = core_text::substr($pivottoshow, 0, 1);
-        }
+        if ($printpivot) {
+            $pivot = $entry->{$pivotkey};
+            $upperpivot = core_text::strtoupper($pivot);
+            $pivottoshow = core_text::strtoupper(format_string($pivot, true, $fmtoptions));
 
-        // if there's a group break
-        if ( $currentpivot != $upperpivot ) {
+            // Reduce pivot to 1cc if necessary.
+            if (!$fullpivot) {
+                $upperpivot = core_text::substr($upperpivot, 0, 1);
+                $pivottoshow = core_text::substr($pivottoshow, 0, 1);
+            }
 
-            // print the group break if apply
-            if ( $printpivot )  {
+            // If there's a group break.
+            if ($currentpivot != $upperpivot) {
                 $currentpivot = $upperpivot;
+
+                // print the group break if apply
 
                 echo '<div>';
                 echo '<table cellspacing="0" class="glossarycategoryheader">';
 
                 echo '<tr>';
-                if ( isset($entry->userispivot) ) {
+                if ($userispivot) {
                 // printing the user icon if defined (only when browsing authors)
                     echo '<th align="left">';
-
-                    $user = $DB->get_record("user", array("id"=>$entry->userid));
+                    $user = mod_glossary_entry_query_builder::get_user_from_record($entry);
                     echo $OUTPUT->user_picture($user, array('courseid'=>$course->id));
                     $pivottoshow = fullname($user, has_capability('moodle/site:viewfullnames', context_course::instance($course->id)));
                 } else {
@@ -492,7 +512,6 @@ if ($allentries) {
 
                 echo $OUTPUT->heading($pivottoshow, 3);
                 echo "</th></tr></table></div>\n";
-
             }
         }
 
@@ -519,6 +538,10 @@ if ($allentries) {
         /// and finally print the entry.
         glossary_print_entry($course, $cm, $glossary, $entry, $mode, $hook,1,$displayformat);
         $entriesshown++;
+    }
+    // The all entries value may be a recordset or an array.
+    if ($allentries instanceof moodle_recordset) {
+        $allentries->close();
     }
 }
 if ( !$entriesshown ) {

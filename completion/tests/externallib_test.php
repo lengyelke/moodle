@@ -92,7 +92,7 @@ class core_completion_externallib_testcase extends externallib_advanced_testcase
      * Test update_activity_completion_status
      */
     public function test_get_activities_completion_status() {
-        global $DB, $CFG;
+        global $DB, $CFG, $PAGE;
 
         $this->resetAfterTest(true);
 
@@ -103,20 +103,34 @@ class core_completion_externallib_testcase extends externallib_advanced_testcase
         $course = $this->getDataGenerator()->create_course(array('enablecompletion' => 1,
                                                                     'groupmode' => SEPARATEGROUPS,
                                                                     'groupmodeforce' => 1));
+        availability_completion\condition::wipe_static_cache();
 
-        $data = $this->getDataGenerator()->create_module('data', array('course' => $course->id),
-                                                             array('completion' => 1));
-        $forum = $this->getDataGenerator()->create_module('forum',  array('course' => $course->id),
-                                                             array('completion' => 1));
-        $assign = $this->getDataGenerator()->create_module('assign',  array('course' => $course->id));
+        $data = $this->getDataGenerator()->create_module('data',
+            ['course' => $course->id],
+            ['completion' => COMPLETION_TRACKING_MANUAL],
+        );
+        $forum = $this->getDataGenerator()->create_module('forum',
+            ['course' => $course->id],
+            ['completion' => COMPLETION_TRACKING_MANUAL],
+        );
+        $forumautocompletion = $this->getDataGenerator()->create_module('forum',
+            ['course' => $course->id],
+            ['showdescription' => true, 'completionview' => 1, 'completion' => COMPLETION_TRACKING_AUTOMATIC],
+        );
+        $availability = '{"op":"&","c":[{"type":"completion","cm":' . $forum->cmid .',"e":1}],"showc":[true]}';
+        $assign = $this->getDataGenerator()->create_module('assign',
+            ['course' => $course->id],
+            ['availability' => $availability],
+        );
         $page = $this->getDataGenerator()->create_module('page',  array('course' => $course->id),
                                                             array('completion' => 1, 'visible' => 0));
 
         $cmdata = get_coursemodule_from_id('data', $data->cmid);
         $cmforum = get_coursemodule_from_id('forum', $forum->cmid);
+        $cmforumautocompletion = get_coursemodule_from_id('forum', $forumautocompletion->cmid);
 
         $studentrole = $DB->get_record('role', array('shortname' => 'student'));
-        $teacherrole = $DB->get_record('role', array('shortname' => 'teacher'));
+        $teacherrole = $DB->get_record('role', array('shortname' => 'editingteacher'));
         $this->getDataGenerator()->enrol_user($student->id, $course->id, $studentrole->id);
         $this->getDataGenerator()->enrol_user($teacher->id, $course->id, $teacherrole->id);
 
@@ -137,8 +151,13 @@ class core_completion_externallib_testcase extends externallib_advanced_testcase
         $result = external_api::clean_returnvalue(
             core_completion_external::get_activities_completion_status_returns(), $result);
 
-        // We added 4 activities, but only 3 with completion enabled and one of those is hidden.
-        $this->assertCount(2, $result['statuses']);
+        // We added 5 activities, but only 4 with completion enabled and one of those is hidden.
+        $numberofactivities = 5;
+        $numberofhidden = 1;
+        $numberofcompletions = $numberofactivities - $numberofhidden;
+        $numberofstatusstudent = 3;
+
+        $this->assertCount($numberofstatusstudent, $result['statuses']);
 
         $activitiesfound = 0;
         foreach ($result['statuses'] as $status) {
@@ -146,13 +165,42 @@ class core_completion_externallib_testcase extends externallib_advanced_testcase
                 $activitiesfound++;
                 $this->assertEquals(COMPLETION_COMPLETE, $status['state']);
                 $this->assertEquals(COMPLETION_TRACKING_MANUAL, $status['tracking']);
+                $this->assertTrue($status['valueused']);
+                $this->assertTrue($status['hascompletion']);
+                $this->assertFalse($status['isautomatic']);
+                $this->assertTrue($status['istrackeduser']);
+                $this->assertTrue($status['uservisible']);
+                $details = $status['details'];
+                $this->assertCount(0, $details);
+            } else if ($status['cmid'] == $forumautocompletion->cmid) {
+                $activitiesfound++;
+                $this->assertEquals(COMPLETION_INCOMPLETE, $status['state']);
+                $this->assertEquals(COMPLETION_TRACKING_AUTOMATIC, $status['tracking']);
+                $this->assertFalse($status['valueused']);
+                $this->assertTrue($status['hascompletion']);
+                $this->assertTrue($status['isautomatic']);
+                $this->assertTrue($status['istrackeduser']);
+                $this->assertTrue($status['uservisible']);
+                $details = $status['details'];
+                $this->assertCount(1, $details);
+                $this->assertEquals('completionview', $details[0]['rulename']);
+                $this->assertEquals(0, $details[0]['rulevalue']['status']);
+
             } else if ($status['cmid'] == $data->cmid and $status['modname'] == 'data' and $status['instance'] == $data->id) {
                 $activitiesfound++;
                 $this->assertEquals(COMPLETION_INCOMPLETE, $status['state']);
                 $this->assertEquals(COMPLETION_TRACKING_MANUAL, $status['tracking']);
+                $this->assertFalse($status['valueused']);
+                $this->assertFalse($status['valueused']);
+                $this->assertTrue($status['hascompletion']);
+                $this->assertFalse($status['isautomatic']);
+                $this->assertTrue($status['istrackeduser']);
+                $this->assertTrue($status['uservisible']);
+                $details = $status['details'];
+                $this->assertCount(0, $details);
             }
         }
-        $this->assertEquals(2, $activitiesfound);
+        $this->assertEquals(3, $activitiesfound);
 
         // Teacher should see students status, they are in different groups but the teacher can access all groups.
         $this->setUser($teacher);
@@ -161,10 +209,58 @@ class core_completion_externallib_testcase extends externallib_advanced_testcase
         $result = external_api::clean_returnvalue(
             core_completion_external::get_activities_completion_status_returns(), $result);
 
-        // We added 4 activities, but only 3 with completion enabled and one of those is hidden.
-        $this->assertCount(3, $result['statuses']);
+        $this->assertCount($numberofcompletions, $result['statuses']);
 
-        // Change teacher role capabilities (disable access al goups).
+        // Override status by teacher.
+        $completion->update_state($cmforum, COMPLETION_INCOMPLETE, $student->id, true);
+
+        $result = core_completion_external::get_activities_completion_status($course->id, $student->id);
+        // We need to execute the return values cleaning process to simulate the web service server.
+        $result = external_api::clean_returnvalue(
+            core_completion_external::get_activities_completion_status_returns(), $result);
+
+        // Check forum has been overriden by the teacher.
+        foreach ($result['statuses'] as $status) {
+            if ($status['cmid'] == $forum->cmid) {
+                $this->assertEquals(COMPLETION_INCOMPLETE, $status['state']);
+                $this->assertEquals(COMPLETION_TRACKING_MANUAL, $status['tracking']);
+                $this->assertEquals($teacher->id, $status['overrideby']);
+                break;
+            }
+        }
+
+        // Teacher should see his own completion status.
+
+        // Forum complete for teacher.
+        $completion = new completion_info($course);
+        $completion->update_state($cmforum, COMPLETION_COMPLETE);
+
+        $result = core_completion_external::get_activities_completion_status($course->id, $teacher->id);
+        // We need to execute the return values cleaning process to simulate the web service server.
+        $result = external_api::clean_returnvalue(
+            core_completion_external::get_activities_completion_status_returns(), $result);
+
+        $this->assertCount($numberofcompletions, $result['statuses']);
+
+        $activitiesfound = 0;
+        foreach ($result['statuses'] as $status) {
+            if ($status['cmid'] == $forum->cmid and $status['modname'] == 'forum' and $status['instance'] == $forum->id) {
+                $activitiesfound++;
+                $this->assertEquals(COMPLETION_COMPLETE, $status['state']);
+                $this->assertEquals(COMPLETION_TRACKING_MANUAL, $status['tracking']);
+            } else if ($status['cmid'] == $forumautocompletion->cmid) {
+                $activitiesfound++;
+                $this->assertEquals(COMPLETION_INCOMPLETE, $status['state']);
+                $this->assertEquals(COMPLETION_TRACKING_AUTOMATIC, $status['tracking']);
+            } else {
+                $activitiesfound++;
+                $this->assertEquals(COMPLETION_INCOMPLETE, $status['state']);
+                $this->assertEquals(COMPLETION_TRACKING_MANUAL, $status['tracking']);
+            }
+        }
+        $this->assertEquals(4, $activitiesfound);
+
+        // Change teacher role capabilities (disable access all groups).
         $context = context_course::instance($course->id);
         assign_capability('moodle/site:accessallgroups', CAP_PROHIBIT, $teacherrole->id, $context);
         accesslib_clear_all_caches_for_unit_testing();
@@ -182,8 +278,99 @@ class core_completion_externallib_testcase extends externallib_advanced_testcase
         // We need to execute the return values cleaning process to simulate the web service server.
         $result = external_api::clean_returnvalue(
             core_completion_external::get_activities_completion_status_returns(), $result);
-        // We added 4 activities, but only 3 with completion enabled and one of those is hidden.
-        $this->assertCount(3, $result['statuses']);
+        $this->assertCount($numberofcompletions, $result['statuses']);
+    }
+
+    /**
+     * Test override_activity_completion_status
+     */
+    public function test_override_activity_completion_status() {
+        global $DB, $CFG;
+        $this->resetAfterTest(true);
+
+        // Create course with teacher and student enrolled.
+        $CFG->enablecompletion = true;
+        $course  = $this->getDataGenerator()->create_course(['enablecompletion' => 1]);
+        $student = $this->getDataGenerator()->create_user();
+        $teacher = $this->getDataGenerator()->create_user();
+        $studentrole = $DB->get_record('role', ['shortname' => 'student']);
+        $this->getDataGenerator()->enrol_user($student->id, $course->id, $studentrole->id);
+        $teacherrole = $DB->get_record('role', ['shortname' => 'teacher']);
+        $this->getDataGenerator()->enrol_user($teacher->id, $course->id, $teacherrole->id);
+
+        // Create 2 activities, one with manual completion (data), one with automatic completion triggered by viewing it (forum).
+        $data    = $this->getDataGenerator()->create_module('data', ['course' => $course->id], ['completion' => 1]);
+        $forum   = $this->getDataGenerator()->create_module('forum',  ['course' => $course->id],
+                                                            ['completion' => 2, 'completionview' => 1]);
+        $cmdata = get_coursemodule_from_id('data', $data->cmid);
+        $cmforum = get_coursemodule_from_id('forum', $forum->cmid);
+
+        // Manually complete the data activity as the student.
+        $this->setUser($student);
+        $completion = new completion_info($course);
+        $completion->update_state($cmdata, COMPLETION_COMPLETE);
+
+        // Test overriding the status of the manual-completion-activity 'incomplete'.
+        $this->setUser($teacher);
+        $result = core_completion_external::override_activity_completion_status($student->id, $data->cmid, COMPLETION_INCOMPLETE);
+        $result = external_api::clean_returnvalue(core_completion_external::override_activity_completion_status_returns(), $result);
+        $this->assertEquals($result['state'], COMPLETION_INCOMPLETE);
+        $completiondata = $completion->get_data($cmdata, false, $student->id);
+        $this->assertEquals(COMPLETION_INCOMPLETE, $completiondata->completionstate);
+
+        // Test overriding the status of the manual-completion-activity back to 'complete'.
+        $result = core_completion_external::override_activity_completion_status($student->id, $data->cmid, COMPLETION_COMPLETE);
+        $result = external_api::clean_returnvalue(core_completion_external::override_activity_completion_status_returns(), $result);
+        $this->assertEquals($result['state'], COMPLETION_COMPLETE);
+        $completiondata = $completion->get_data($cmdata, false, $student->id);
+        $this->assertEquals(COMPLETION_COMPLETE, $completiondata->completionstate);
+
+        // Test overriding the status of the auto-completion-activity to 'complete'.
+        $result = core_completion_external::override_activity_completion_status($student->id, $forum->cmid, COMPLETION_COMPLETE);
+        $result = external_api::clean_returnvalue(core_completion_external::override_activity_completion_status_returns(), $result);
+        $this->assertEquals($result['state'], COMPLETION_COMPLETE);
+        $completionforum = $completion->get_data($cmforum, false, $student->id);
+        $this->assertEquals(COMPLETION_COMPLETE, $completionforum->completionstate);
+
+        // Test overriding the status of the auto-completion-activity to 'incomplete'.
+        $result = core_completion_external::override_activity_completion_status($student->id, $forum->cmid, COMPLETION_INCOMPLETE);
+        $result = external_api::clean_returnvalue(core_completion_external::override_activity_completion_status_returns(), $result);
+        $this->assertEquals($result['state'], COMPLETION_INCOMPLETE);
+        $completionforum = $completion->get_data($cmforum, false, $student->id);
+        $this->assertEquals(COMPLETION_INCOMPLETE, $completionforum->completionstate);
+
+        // Test overriding the status of the auto-completion-activity to an invalid state.
+        $this->expectException('moodle_exception');
+        core_completion_external::override_activity_completion_status($student->id, $forum->cmid, 3);
+    }
+
+    /**
+     * Test overriding the activity completion status as a user without the capability to do so.
+     */
+    public function test_override_status_user_without_capability() {
+        global $DB, $CFG;
+        $this->resetAfterTest(true);
+
+        // Create course with teacher and student enrolled.
+        $CFG->enablecompletion = true;
+        $course  = $this->getDataGenerator()->create_course(['enablecompletion' => 1]);
+        $student = $this->getDataGenerator()->create_user();
+        $teacher = $this->getDataGenerator()->create_user();
+        $studentrole = $DB->get_record('role', ['shortname' => 'student']);
+        $this->getDataGenerator()->enrol_user($student->id, $course->id, $studentrole->id);
+        $teacherrole = $DB->get_record('role', ['shortname' => 'teacher']);
+        $this->getDataGenerator()->enrol_user($teacher->id, $course->id, $teacherrole->id);
+        $coursecontext = context_course::instance($course->id);
+
+        // Create an activity with automatic completion (a forum).
+        $forum   = $this->getDataGenerator()->create_module('forum',  ['course' => $course->id],
+            ['completion' => 2, 'completionview' => 1]);
+
+        // Test overriding the status of the activity for a user without the capability.
+        $this->setUser($teacher);
+        assign_capability('moodle/course:overridecompletion', CAP_PREVENT, $teacherrole->id, $coursecontext);
+        $this->expectException('required_capability_exception');
+        core_completion_external::override_activity_completion_status($student->id, $forum->cmid, COMPLETION_COMPLETE);
     }
 
     /**
@@ -220,7 +407,7 @@ class core_completion_externallib_testcase extends externallib_advanced_testcase
         $cmforum = get_coursemodule_from_id('forum', $forum->cmid);
 
         $studentrole = $DB->get_record('role', array('shortname' => 'student'));
-        $teacherrole = $DB->get_record('role', array('shortname' => 'teacher'));
+        $teacherrole = $DB->get_record('role', array('shortname' => 'editingteacher'));
         $this->getDataGenerator()->enrol_user($student->id, $course->id, $studentrole->id);
         $this->getDataGenerator()->enrol_user($teacher->id, $course->id, $teacherrole->id);
 

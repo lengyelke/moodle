@@ -28,10 +28,20 @@ require_once(__DIR__ . '/fixtures/event.php');
 require_once(__DIR__ . '/fixtures/store.php');
 
 class logstore_database_store_testcase extends advanced_testcase {
-    public function test_log_writing() {
+    /**
+     * Tests log writing.
+     *
+     * @param bool $jsonformat True to test with JSON format
+     * @dataProvider test_log_writing_provider
+     * @throws moodle_exception
+     */
+    public function test_log_writing(bool $jsonformat) {
         global $DB, $CFG;
         $this->resetAfterTest();
         $this->preventResetByRollback(); // Logging waits till the transaction gets committed.
+
+        // Apply JSON format system setting.
+        set_config('jsonformat', $jsonformat ? 1 : 0, 'logstore_database');
 
         $dbman = $DB->get_manager();
         $this->assertTrue($dbman->table_exists('logstore_standard_log'));
@@ -52,8 +62,7 @@ class logstore_database_store_testcase extends advanced_testcase {
         $this->assertCount(0, $stores);
 
         // Fake the settings, we will abuse the standard plugin table here...
-        $parts = explode('_', get_class($DB));
-        set_config('dbdriver', $parts[1] . '/' . $parts[0], 'logstore_database');
+        set_config('dbdriver', $CFG->dblibrary . '/' . $CFG->dbtype, 'logstore_database');
         set_config('dbhost', $CFG->dbhost, 'logstore_database');
         set_config('dbuser', $CFG->dbuser, 'logstore_database');
         set_config('dbpass', $CFG->dbpass, 'logstore_database');
@@ -83,6 +92,11 @@ class logstore_database_store_testcase extends advanced_testcase {
             set_config('dbcollation', $CFG->dboptions['dbcollation'], 'logstore_database');
         } else {
             set_config('dbcollation', '', 'logstore_database');
+        }
+        if (!empty($CFG->dboptions['dbhandlesoptions'])) {
+            set_config('dbhandlesoptions', $CFG->dboptions['dbhandlesoptions'], 'logstore_database');
+        } else {
+            set_config('dbhandlesoptions', false, 'logstore_database');
         }
 
         // Enable logging plugin.
@@ -114,7 +128,11 @@ class logstore_database_store_testcase extends advanced_testcase {
 
         $log1 = reset($logs);
         unset($log1->id);
-        $log1->other = unserialize($log1->other);
+        if ($jsonformat) {
+            $log1->other = json_decode($log1->other, true);
+        } else {
+            $log1->other = unserialize($log1->other);
+        }
         $log1 = (array)$log1;
         $data = $event1->get_data();
         $data['origin'] = 'cli';
@@ -141,7 +159,11 @@ class logstore_database_store_testcase extends advanced_testcase {
 
         $log3 = array_shift($logs);
         unset($log3->id);
-        $log3->other = unserialize($log3->other);
+        if ($jsonformat) {
+            $log3->other = json_decode($log3->other, true);
+        } else {
+            $log3->other = unserialize($log3->other);
+        }
         $log3 = (array)$log3;
         $data = $event2->get_data();
         $data['origin'] = 'cli';
@@ -223,6 +245,19 @@ class logstore_database_store_testcase extends advanced_testcase {
 
         set_config('enabled_stores', '', 'tool_log');
         get_log_manager(true);
+    }
+
+    /**
+     * Returns different JSON format settings so the test can be run with JSON format either on or
+     * off.
+     *
+     * @return [bool] Array of true/false
+     */
+    public static function test_log_writing_provider(): array {
+        return [
+            [false],
+            [true]
+        ];
     }
 
     /**

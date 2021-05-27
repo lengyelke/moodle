@@ -1,5 +1,5 @@
 @mod @mod_quiz
-Feature: Attemp a quiz where some questions require that the previous question has been answered.
+Feature: Attempt a quiz
   As a student
   In order to demonstrate what I know
   I need to be able to attempt quizzes
@@ -22,7 +22,7 @@ Feature: Attemp a quiz where some questions require that the previous question h
       | quiz       | Quiz 1 | Quiz 1 description | C1     | quiz1    |
 
   @javascript
-  Scenario: Attempt a quiz with a single unnamed section
+  Scenario: Attempt a quiz with a single unnamed section, review and re-attempt
     Given the following "questions" exist:
       | questioncategory | qtype       | name  | questiontext    |
       | Test questions   | truefalse   | TF1   | First question  |
@@ -31,16 +31,21 @@ Feature: Attemp a quiz where some questions require that the previous question h
       | question | page | maxmark |
       | TF1      | 1    |         |
       | TF2      | 1    | 3.0     |
-    When I log in as "student"
-    And I follow "Course 1"
-    And I follow "Quiz 1"
-    And I press "Attempt quiz now"
-    And I click on "True" "radio" in the "First question" "question"
-    And I click on "False" "radio" in the "Second question" "question"
-    And I press "Next"
-    And I press "Submit all and finish"
-    And I click on "Submit all and finish" "button" in the "Confirmation" "dialogue"
-    Then I should see "25.00 out of 100.00"
+    And user "student" has attempted "Quiz 1" with responses:
+      | slot | response |
+      |   1  | True     |
+      |   2  | False    |
+    When I am on the "Quiz 1" "mod_quiz > View" page logged in as "student"
+    And I follow "Review"
+    Then I should see "Started on"
+    And I should see "State"
+    And I should see "Completed on"
+    And I should see "Time taken"
+    And I should see "Marks"
+    And I should see "Grade"
+    And I should see "25.00 out of 100.00"
+    And I follow "Finish review"
+    And I press "Re-attempt quiz"
 
   @javascript
   Scenario: Attempt a quiz with mulitple sections
@@ -62,14 +67,12 @@ Feature: Attemp a quiz where some questions require that the previous question h
       | TF6      | 4    |
     And quiz "Quiz 1" contains the following sections:
       | heading   | firstslot | shuffle |
-      | Section 1 | 1         | 1       |
+      | Section 1 | 1         | 0       |
       | Section 2 | 3         | 0       |
       |           | 4         | 1       |
-      | Section 3 | 5         | 0       |
+      | Section 3 | 5         | 1       |
 
-    When I log in as "student"
-    And I follow "Course 1"
-    And I follow "Quiz 1"
+    When I am on the "Quiz 1" "mod_quiz > View" page logged in as "student"
     And I press "Attempt quiz now"
 
     Then I should see "Section 1" in the "Quiz navigation" "block"
@@ -99,3 +102,53 @@ Feature: Attemp a quiz where some questions require that the previous question h
     And I should see question "4" in section "Section 2" in the quiz navigation
     And I should see question "5" in section "Section 3" in the quiz navigation
     And I should see question "6" in section "Section 3" in the quiz navigation
+
+    And I follow "Show one page at a time"
+    And I should see "First question"
+    And I should not see "Third question"
+    And I should see "Next page"
+
+    And I follow "Show all questions on one page"
+    And I should see "Fourth question"
+    And I should see "Sixth question"
+    And I should not see "Next page"
+
+  @javascript
+  Scenario: Next and previous navigation
+    Given the following "questions" exist:
+      | questioncategory | qtype       | name  | questiontext                |
+      | Test questions   | truefalse   | TF1   | Text of the first question  |
+      | Test questions   | truefalse   | TF2   | Text of the second question |
+    And quiz "Quiz 1" contains the following questions:
+      | question | page |
+      | TF1      | 1    |
+      | TF2      | 2    |
+    When I am on the "Quiz 1" "mod_quiz > View" page logged in as "student"
+    And I press "Attempt quiz now"
+    Then I should see "Text of the first question"
+    And I should not see "Text of the second question"
+    And I press "Next page"
+    And I should see "Text of the second question"
+    And I should not see "Text of the first question"
+    And I click on "Finish attempt ..." "button" in the "region-main" "region"
+    And I should see "Summary of attempt"
+    And I press "Return to attempt"
+    And I should see "Text of the second question"
+    And I should not see "Text of the first question"
+    And I press "Previous page"
+    And I should see "Text of the first question"
+    And I should not see "Text of the second question"
+    And I follow "Finish attempt ..."
+    And I press "Submit all and finish"
+    And I click on "Submit all and finish" "button" in the "Confirmation" "dialogue"
+    And I should see "Text of the first question"
+    And I should see "Text of the second question"
+    And I follow "Show one page at a time"
+    And I should see "Text of the first question"
+    And I should not see "Text of the second question"
+    And I follow "Next page"
+    And I should see "Text of the second question"
+    And I should not see "Text of the first question"
+    And I follow "Previous page"
+    And I should see "Text of the first question"
+    And I should not see "Text of the second question"

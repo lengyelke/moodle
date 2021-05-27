@@ -20,9 +20,7 @@ Feature: Create shortcuts
     And I upload "lib/tests/fixtures/empty.txt" file to "Files" filemanager
     Then I should see "empty.txt" in the "div.fp-content" "css_element"
     And I press "Save changes"
-    And I am on site homepage
-    And I follow "Course 1"
-    And I turn editing mode on
+    And I am on "Course 1" course homepage with editing mode on
     And I add a "Folder" to section "1"
     And I set the following fields to these values:
       | Name        | Test folder             |
@@ -33,7 +31,7 @@ Feature: Create shortcuts
     And ".fp-content .fp-file.fp-isreference" "css_element" should not exist
     And I add "empty.txt" file from "Private files" to "Files" filemanager as:
       | Save as | empty_ref.txt |
-      | Create an alias/shortcut to the file | 1 |
+      | Link to the file | 1 |
     And I should see "2" elements in "Files" filemanager
     And I should see "empty_ref.txt" in the ".fp-content .fp-file.fp-isreference" "css_element"
     And I press "Save and display"
@@ -56,7 +54,7 @@ Feature: Create shortcuts
     # ------ Overwriting non-reference with a reference ---------
     And I add and overwrite "empty.txt" file from "Private files" to "Files" filemanager as:
       | Save as | empty_ref.txt |
-      | Create an alias/shortcut to the file | 1 |
+      | Link to the file | 1 |
     And I should see "2" elements in "Files" filemanager
     And I should see "empty_ref.txt" in the ".fp-content .fp-file.fp-isreference" "css_element"
     And I press "Save changes"

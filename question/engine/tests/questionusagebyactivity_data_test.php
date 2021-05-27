@@ -26,8 +26,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 global $CFG;
-require_once(dirname(__FILE__) . '/../lib.php');
-require_once(dirname(__FILE__) . '/helpers.php');
+require_once(__DIR__ . '/../lib.php');
+require_once(__DIR__ . '/helpers.php');
 
 
 /**
@@ -66,7 +66,7 @@ class question_usage_db_test extends data_loading_method_test_base {
 
         $qa = $quba->get_question_attempt(1);
 
-        $this->assertEquals($question->questiontext, $qa->get_question()->questiontext);
+        $this->assertEquals($question->questiontext, $qa->get_question(false)->questiontext);
 
         $this->assertEquals(3, $qa->get_num_steps());
 

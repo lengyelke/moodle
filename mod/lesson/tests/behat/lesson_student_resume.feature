@@ -14,18 +14,18 @@ Feature: In a lesson activity a student should
       | user | course | role |
       | teacher1 | C1 | editingteacher |
       | student1 | C1 | student |
+    And the following "activity" exists:
+      | activity    | lesson                      |
+      | name        | Test lesson name            |
+      | intro       | Test lesson description     |
+      | course      | C1                          |
+      | idnumber    | 0001                        |
+      | section     | 1                           |
+      | retake      | 1                           |
     And I log in as "teacher1"
-    And I follow "Course 1"
-    And I turn editing mode on
-    And I add a "Lesson" to section "1"
-    And I set the following fields to these values:
-      | Name | Test lesson name |
-      | Description | Test lesson description |
-      | Re-takes allowed | Yes |
-    And I press "Save and return to course"
+    And I am on "Course 1" course homepage
     And I follow "Test lesson name"
 
-  @javascript
   Scenario: resume a lesson with both content then question pages
     Given I follow "Add a content page"
     And I set the following fields to these values:
@@ -34,7 +34,7 @@ Feature: In a lesson activity a student should
       | id_answer_editor_0 | Next page |
       | id_jumpto_0 | Next page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -47,7 +47,7 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -60,7 +60,7 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Add a content page"
+    And I select "Add a content page" from the "qtype" singleselect
     And I set the following fields to these values:
       | Page title | Third page name |
       | Page contents | Third page contents |
@@ -69,7 +69,7 @@ Feature: In a lesson activity a student should
       | id_answer_editor_1 | Next page |
       | id_jumpto_1 | Next page |
     And I press "Save page"
-    And I set the field "qtype" to "Add a content page"
+    And I select "Add a content page" from the "qtype" singleselect
     And I set the following fields to these values:
       | Page title | Second page name |
       | Page contents | Second page contents |
@@ -80,10 +80,12 @@ Feature: In a lesson activity a student should
     And I press "Save page"
     And I log out
     When I log in as "student1"
-    And I follow "Course 1"
+    And I am on "Course 1" course homepage
     And I follow "Test lesson name"
     And I should see "First page contents"
     And I press "Next page"
+    # Add 1 sec delay so lesson knows a valid attempt has been made in past.
+    And I wait "1" seconds
     And I should see "Second page contents"
     And I press "Next page"
     And I should see "Third page contents"
@@ -92,6 +94,8 @@ Feature: In a lesson activity a student should
     And I should see "Do you want to start at the last page you saw?"
     And I follow "Yes"
     Then I should see "Third page contents"
+    # Add 1 sec delay so lesson knows differentiate 3rd and paper attempts.
+    And I wait "1" seconds
     And I press "Next page"
     And I should see "Paper is made from trees."
     And I follow "Test lesson name"
@@ -115,7 +119,6 @@ Feature: In a lesson activity a student should
     And I press "Continue"
     And I should see "Congratulations - end of lesson reached"
 
-  @javascript
   Scenario: resume a lesson with only content pages
     Given I follow "Add a content page"
     And I set the following fields to these values:
@@ -124,7 +127,7 @@ Feature: In a lesson activity a student should
       | id_answer_editor_0 | Next page |
       | id_jumpto_0 | Next page |
     And I press "Save page"
-    And I set the field "qtype" to "Add a content page"
+    And I select "Add a content page" from the "qtype" singleselect
     And I set the following fields to these values:
       | Page title | Fourth page name |
       | Page contents | Fourth page contents |
@@ -133,7 +136,7 @@ Feature: In a lesson activity a student should
       | id_answer_editor_1 | End of lesson |
       | id_jumpto_1 | End of lesson |
     And I press "Save page"
-    And I set the field "qtype" to "Add a content page"
+    And I select "Add a content page" from the "qtype" singleselect
     And I set the following fields to these values:
       | Page title | Third page name |
       | Page contents | Third page contents |
@@ -142,7 +145,7 @@ Feature: In a lesson activity a student should
       | id_answer_editor_1 | Next page |
       | id_jumpto_1 | Next page |
     And I press "Save page"
-    And I set the field "qtype" to "Add a content page"
+    And I select "Add a content page" from the "qtype" singleselect
     And I set the following fields to these values:
       | Page title | Second page name |
       | Page contents | Second page contents |
@@ -153,11 +156,13 @@ Feature: In a lesson activity a student should
     And I press "Save page"
     And I log out
     When I log in as "student1"
-    And I follow "Course 1"
+    And I am on "Course 1" course homepage
     And I follow "Test lesson name"
     And I should see "First page contents"
     And I press "Next page"
     And I should see "Second page contents"
+    # Add 1 sec delay so lesson knows a valid attempt has been made in past.
+    And I wait "1" seconds
     And I press "Next page"
     And I should see "Third page contents"
     And I follow "Test lesson name"
@@ -167,15 +172,16 @@ Feature: In a lesson activity a student should
     And I should see "Third page contents"
     And I press "Next page"
     And I should see "Fourth page contents"
+    # Add 1 sec delay so lesson knows a valid attempt has been made in past.
+    And I wait "1" seconds
     And I press "End of lesson"
     And I log out
     And I log in as "student1"
-    And I follow "Course 1"
+    And I am on "Course 1" course homepage
     And I follow "Test lesson name"
     And I should see "First page contents"
     And I log out
 
-  @javascript
   Scenario: resume a lesson with both question then content pages
     Given I follow "Add a question page"
     And I set the field "Select a question type" to "True/false"
@@ -190,7 +196,7 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -203,14 +209,14 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Add a content page"
+    And I select "Add a content page" from the "qtype" singleselect
     And I set the following fields to these values:
       | Page title | Content page 2 |
       | Page contents | Second content page |
       | id_answer_editor_0 | Next page |
       | id_jumpto_0 | Next page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -223,7 +229,7 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -236,7 +242,7 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -249,7 +255,7 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Add a content page"
+    And I select "Add a content page" from the "qtype" singleselect
     And I set the following fields to these values:
       | Page title | Content page 1 |
       | Page contents | First content page |
@@ -258,7 +264,7 @@ Feature: In a lesson activity a student should
     And I press "Save page"
     And I log out
     When I log in as "student1"
-    And I follow "Course 1"
+    And I am on "Course 1" course homepage
     And I follow "Test lesson name"
     And I should see "Cat is an amphibian"
     And I set the following fields to these values:
@@ -275,6 +281,8 @@ Feature: In a lesson activity a student should
     And I should see "1+1=2"
     And I set the following fields to these values:
       | True | 1 |
+    # Add 1 sec delay so lesson knows a valid attempt has been made in past.
+    And I wait "1" seconds
     And I press "Submit"
     And I press "Continue"
     And I should see "2+2=4"
@@ -285,6 +293,8 @@ Feature: In a lesson activity a student should
     And I should see "2+2=4"
     And I set the following fields to these values:
       | True | 1 |
+    # Add 1 sec delay so lesson knows a valid attempt has been made in past.
+    And I wait "1" seconds
     And I press "Submit"
     And I press "Continue"
     And I should see "Second content page"
@@ -301,7 +311,6 @@ Feature: In a lesson activity a student should
     And I press "Continue"
     And I should see "Congratulations - end of lesson reached"
 
-  @javascript
   Scenario: resume a lesson with only question pages
     Given I follow "Add a question page"
     And I set the field "Select a question type" to "True/false"
@@ -316,7 +325,7 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -329,7 +338,7 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -342,7 +351,7 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -355,7 +364,7 @@ Feature: In a lesson activity a student should
       | id_response_editor_1 | Wrong |
       | id_jumpto_1 | This page |
     And I press "Save page"
-    And I set the field "qtype" to "Question"
+    And I select "Add a question page" from the "qtype" singleselect
     And I set the field "Select a question type" to "True/false"
     And I press "Add a question page"
     And I set the following fields to these values:
@@ -370,7 +379,7 @@ Feature: In a lesson activity a student should
     And I press "Save page"
     And I log out
     When I log in as "student1"
-    And I follow "Course 1"
+    And I am on "Course 1" course homepage
     And I follow "Test lesson name"
     And I should see "Cat is an amphibian"
     And I set the following fields to these values:
@@ -385,6 +394,8 @@ Feature: In a lesson activity a student should
     And I should see "1+1=2"
     And I set the following fields to these values:
       | True | 1 |
+    # Add 1 sec delay so lesson knows a valid attempt has been made in past.
+    And I wait "1" seconds
     And I press "Submit"
     And I press "Continue"
     And I should see "2+2=4"
@@ -395,6 +406,8 @@ Feature: In a lesson activity a student should
     And I should see "2+2=4"
     And I set the following fields to these values:
       | True | 1 |
+    # Add 1 sec delay so lesson knows a valid attempt has been made in past.
+    And I wait "1" seconds
     And I press "Submit"
     And I press "Continue"
     And I should see "Kermit is a frog"

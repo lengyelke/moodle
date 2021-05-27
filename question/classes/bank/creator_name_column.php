@@ -14,16 +14,24 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
+/**
+ * A column type for the name of the question creator.
+ *
+ * @package   core_question
+ * @copyright 2009 Tim Hunt
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 
 namespace core_question\bank;
+defined('MOODLE_INTERNAL') || die();
+
 
 /**
  * A column type for the name of the question creator.
  *
- * @copyright  2009 Tim Hunt
- * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @copyright 2009 Tim Hunt
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-
 class creator_name_column extends column_base {
     public function get_name() {
         return 'creatorname';
@@ -47,7 +55,7 @@ class creator_name_column extends column_base {
     }
 
     public function get_required_fields() {
-        $allnames = get_all_user_name_fields();
+        $allnames = \core_user\fields::get_name_fields();
         $requiredfields = array();
         foreach ($allnames as $allname) {
             $requiredfields[] = 'uc.' . $allname . ' AS creator' . $allname;

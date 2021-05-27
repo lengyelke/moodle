@@ -77,7 +77,7 @@ $context = context_module::instance($cm->id);
 
 
 $PAGE->set_url('/mod/wiki/files.php', array('pageid'=>$pageid));
-require_login($course, true, $cm);
+require_course_login($course, true, $cm);
 
 if (!wiki_user_can_view($subwiki, $wiki)) {
     print_error('cannotviewfiles', 'wiki');
@@ -88,6 +88,13 @@ $PAGE->set_heading($course->fullname);
 $PAGE->navbar->add(format_string(get_string('wikifiles', 'wiki')));
 echo $OUTPUT->header();
 echo $OUTPUT->heading(format_string($wiki->name));
+
+// Render the activity information.
+$cminfo = cm_info::create($cm);
+$completiondetails = \core_completion\cm_completion_details::get_instance($cminfo, $USER->id);
+$activitydates = \core\activity_dates::get_dates_for_module($cminfo, $USER->id);
+echo $OUTPUT->activity_information($cminfo, $completiondetails, $activitydates);
+
 echo $OUTPUT->box(format_module_intro('wiki', $wiki, $PAGE->cm->id), 'generalbox', 'intro');
 
 $renderer = $PAGE->get_renderer('mod_wiki');

@@ -100,7 +100,7 @@ class core_user_myprofile_testcase extends advanced_testcase {
         $category->add_node($node2);
         $category->add_node($node1);
 
-        $this->setExpectedException('coding_exception');
+        $this->expectException(coding_exception::class);
         $category->validate_after_order();
 
     }
@@ -117,7 +117,7 @@ class core_user_myprofile_testcase extends advanced_testcase {
         $category->add_node($node2);
         $category->add_node($node1);
 
-        $this->setExpectedException('coding_exception');
+        $this->expectException(coding_exception::class);
         $category->validate_after_order();
 
     }
@@ -213,7 +213,7 @@ class core_user_myprofile_testcase extends advanced_testcase {
         // Add a node with invalid 'after' and make sure an exception is thrown.
         $node7 = new \core_user\output\myprofile\node('category', 'node7', 'nodetitle', 'noderandom');
         $category->add_node($node7);
-        $this->setExpectedException('coding_exception');
+        $this->expectException(coding_exception::class);
         $category->sort_nodes();
     }
 
@@ -269,7 +269,7 @@ class core_user_myprofile_testcase extends advanced_testcase {
         $this->assertEquals($node1, $node);
 
         // Can't add node with same name.
-        $this->setExpectedException('coding_exception');
+        $this->expectException(coding_exception::class);
         $tree->add_node($node1);
     }
 
@@ -285,7 +285,7 @@ class core_user_myprofile_testcase extends advanced_testcase {
         $this->assertEquals($category1, $category);
 
         // Can't add node with same name.
-        $this->setExpectedException('coding_exception');
+        $this->expectException(coding_exception::class);
         $tree->add_category($category1);
     }
 
@@ -372,7 +372,7 @@ class core_user_myprofile_testcase extends advanced_testcase {
         $this->assertEquals($category6, $category);
 
         // Can't add category with same name.
-        $this->setExpectedException('coding_exception');
+        $this->expectException(coding_exception::class);
         $tree->add_category($category1);
     }
 }

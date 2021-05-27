@@ -76,26 +76,42 @@ if ($param->moveupcontext || $param->movedowncontext) {
     } else {
         $catid = $param->movedowncontext;
     }
+    $newtopcat = question_get_top_category($param->tocontext);
+    if (!$newtopcat) {
+        print_error('invalidcontext');
+    }
     $oldcat = $DB->get_record('question_categories', array('id' => $catid), '*', MUST_EXIST);
-    $qcobject->update_category($catid, '0,'.$param->tocontext, $oldcat->name, $oldcat->info);
+    // Log the move to another context.
+    $category = new stdClass();
+    $category->id = explode(',', $pagevars['cat'], -1)[0];
+    $category->contextid = $param->tocontext;
+    $event = \core\event\question_category_moved::create_from_question_category_instance($category);
+    $event->trigger();
+    $qcobject->update_category($catid, "{$newtopcat->id},{$param->tocontext}", $oldcat->name, $oldcat->info);
     // The previous line does a redirect().
 }
 
-if ($param->delete && ($questionstomove = $DB->count_records("question", array("category" => $param->delete)))) {
-    if (!$category = $DB->get_record("question_categories", array("id" => $param->delete))) {  // security
+if ($param->delete) {
+    if (!$category = $DB->get_record("question_categories", array("id" => $param->delete))) {
         print_error('nocate', 'question', $thispageurl->out(), $param->delete);
     }
-    $categorycontext = context::instance_by_id($category->contextid);
-    $qcobject->moveform = new question_move_form($thispageurl,
-                array('contexts'=>array($categorycontext), 'currentcat'=>$param->delete));
-    if ($qcobject->moveform->is_cancelled()){
-        redirect($thispageurl);
-    }  elseif ($formdata = $qcobject->moveform->get_data()) {
-        /// 'confirm' is the category to move existing questions to
-        list($tocategoryid, $tocontextid) = explode(',', $formdata->category);
-        $qcobject->move_questions_and_delete_category($formdata->delete, $tocategoryid);
-        $thispageurl->remove_params('cat', 'category');
-        redirect($thispageurl);
+
+    question_remove_stale_questions_from_category($param->delete);
+    $questionstomove = $DB->count_records("question", array("category" => $param->delete));
+
+    // Second pass, if we still have questions to move, setup the form.
+    if ($questionstomove) {
+        $categorycontext = context::instance_by_id($category->contextid);
+        $qcobject->moveform = new question_move_form($thispageurl,
+            array('contexts' => array($categorycontext), 'currentcat' => $param->delete));
+        if ($qcobject->moveform->is_cancelled()) {
+            redirect($thispageurl);
+        } else if ($formdata = $qcobject->moveform->get_data()) {
+            list($tocategoryid, $tocontextid) = explode(',', $formdata->category);
+            $qcobject->move_questions_and_delete_category($formdata->delete, $tocategoryid);
+            $thispageurl->remove_params('cat', 'category');
+            redirect($thispageurl);
+        }
     }
 } else {
     $questionstomove = 0;
@@ -108,10 +124,10 @@ if ($qcobject->catform->is_cancelled()) {
     $catformdata->info       = $catformdata->info['text'];
     if (!$catformdata->id) {//new category
         $qcobject->add_category($catformdata->parent, $catformdata->name,
-                $catformdata->info, false, $catformdata->infoformat);
+                $catformdata->info, false, $catformdata->infoformat, $catformdata->idnumber);
     } else {
         $qcobject->update_category($catformdata->id, $catformdata->parent,
-                $catformdata->name, $catformdata->info, $catformdata->infoformat);
+                $catformdata->name, $catformdata->info, $catformdata->infoformat, $catformdata->idnumber);
     }
     redirect($thispageurl);
 } else if ((!empty($param->delete) and (!$questionstomove) and confirm_sesskey())) {
@@ -127,6 +143,10 @@ if ($param->edit) {
 $PAGE->set_title(get_string('editcategories', 'question'));
 $PAGE->set_heading($COURSE->fullname);
 echo $OUTPUT->header();
+
+// Print horizontal nav if needed.
+$renderer = $PAGE->get_renderer('core_question', 'bank');
+echo $renderer->extra_horizontal_navigation();
 
 // Display the UI.
 if (!empty($param->edit)) {

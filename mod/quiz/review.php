@@ -26,13 +26,14 @@
  */
 
 
-require_once(dirname(__FILE__) . '/../../config.php');
+require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot . '/mod/quiz/locallib.php');
 require_once($CFG->dirroot . '/mod/quiz/report/reportlib.php');
 
 $attemptid = required_param('attempt', PARAM_INT);
 $page      = optional_param('page', 0, PARAM_INT);
 $showall   = optional_param('showall', null, PARAM_BOOL);
+$cmid      = optional_param('cmid', null, PARAM_INT);
 
 $url = new moodle_url('/mod/quiz/review.php', array('attempt'=>$attemptid));
 if ($page !== 0) {
@@ -42,7 +43,8 @@ if ($page !== 0) {
 }
 $PAGE->set_url($url);
 
-$attemptobj = quiz_attempt::create($attemptid);
+$attemptobj = quiz_create_attempt_handling_errors($attemptid, $cmid);
+$attemptobj->preload_all_attempt_step_users();
 $page = $attemptobj->force_page_number_into_range($page);
 
 // Now we can validate the params better, re-genrate the page URL.
@@ -93,11 +95,9 @@ if ($options->flags == question_display_options::EDITABLE && optional_param('sav
 
 // Work out appropriate title and whether blocks should be shown.
 if ($attemptobj->is_own_preview()) {
-    $strreviewtitle = get_string('reviewofpreview', 'quiz');
     navigation_node::override_active_url($attemptobj->start_attempt_url());
 
 } else {
-    $strreviewtitle = get_string('reviewofattempt', 'quiz', $attemptobj->get_attempt_number());
     if (empty($attemptobj->get_quiz()->showblocks) && !$attemptobj->is_preview_user()) {
         $PAGE->blocks->show_only_fake_blocks();
     }
@@ -105,7 +105,7 @@ if ($attemptobj->is_own_preview()) {
 
 // Set up the page header.
 $headtags = $attemptobj->get_html_head_contributions($page, $showall);
-$PAGE->set_title($attemptobj->get_quiz_name());
+$PAGE->set_title($attemptobj->review_page_title($page, $showall));
 $PAGE->set_heading($attemptobj->get_course()->fullname);
 
 // Summary table start. ============================================================================
@@ -134,10 +134,10 @@ $summarydata = array();
 if (!$attemptobj->get_quiz()->showuserpicture && $attemptobj->get_userid() != $USER->id) {
     // If showuserpicture is true, the picture is shown elsewhere, so don't repeat it.
     $student = $DB->get_record('user', array('id' => $attemptobj->get_userid()));
-    $usrepicture = new user_picture($student);
-    $usrepicture->courseid = $attemptobj->get_courseid();
+    $userpicture = new user_picture($student);
+    $userpicture->courseid = $attemptobj->get_courseid();
     $summarydata['user'] = array(
-        'title'   => $usrepicture,
+        'title'   => $userpicture,
         'content' => new action_link(new moodle_url('/user/view.php', array(
                                 'id' => $student->id, 'course' => $attemptobj->get_courseid())),
                           fullname($student, true)),
@@ -259,15 +259,4 @@ $PAGE->blocks->add_fake_block($navbc, reset($regions));
 echo $output->review_page($attemptobj, $slots, $page, $showall, $lastpage, $options, $summarydata);
 
 // Trigger an event for this review.
-$params = array(
-    'objectid' => $attemptobj->get_attemptid(),
-    'relateduserid' => $attemptobj->get_userid(),
-    'courseid' => $attemptobj->get_courseid(),
-    'context' => context_module::instance($attemptobj->get_cmid()),
-    'other' => array(
-        'quizid' => $attemptobj->get_quizid()
-    )
-);
-$event = \mod_quiz\event\attempt_reviewed::create($params);
-$event->add_record_snapshot('quiz_attempts', $attemptobj->get_attempt());
-$event->trigger();
+$attemptobj->fire_attempt_reviewed_event();

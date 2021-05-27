@@ -25,7 +25,6 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-
 /**
  * Unit tests for setuplib.php
  *
@@ -44,8 +43,10 @@ class core_setuplib_testcase extends advanced_testcase {
         } else {
             $docroot = $CFG->docroot;
         }
-        $this->assertRegExp('~^' . preg_quote($docroot, '') . '/\d{2}/' . current_language() . '/course/editing$~',
-                get_docs_url('course/editing'));
+        $this->assertMatchesRegularExpression(
+            '~^' . preg_quote($docroot, '') . '/\d{2,3}/' . current_language() . '/course/editing$~',
+            get_docs_url('course/editing')
+        );
     }
 
     /**
@@ -80,7 +81,7 @@ class core_setuplib_testcase extends advanced_testcase {
         global $CFG;
 
         // This doesn't test them all possible ones, but these are set for unit tests.
-        $cfgnames = array('dataroot', 'dirroot', 'tempdir', 'cachedir', 'localcachedir');
+        $cfgnames = array('dataroot', 'dirroot', 'tempdir', 'backuptempdir', 'cachedir', 'localcachedir');
 
         $fixture  = '';
         $expected = '';
@@ -93,8 +94,10 @@ class core_setuplib_testcase extends advanced_testcase {
         $exception     = new moodle_exception('generalexceptionmessage', 'error', '', $fixture, $fixture);
         $exceptioninfo = get_exception_info($exception);
 
-        $this->assertContains($expected, $exceptioninfo->message, 'Exception message does not contain system paths');
-        $this->assertContains($expected, $exceptioninfo->debuginfo, 'Exception debug info does not contain system paths');
+        $this->assertStringContainsString($expected, $exceptioninfo->message,
+            'Exception message does not contain system paths');
+        $this->assertStringContainsString($expected, $exceptioninfo->debuginfo,
+            'Exception debug info does not contain system paths');
     }
 
     public function test_localcachedir() {
@@ -113,7 +116,7 @@ class core_setuplib_testcase extends advanced_testcase {
         remove_dir($CFG->localcachedir, true);
         $dir = make_localcache_directory('', false);
         $this->assertSame($CFG->localcachedir, $dir);
-        $this->assertFileNotExists("$CFG->localcachedir/.htaccess");
+        $this->assertFileDoesNotExist("$CFG->localcachedir/.htaccess");
         $this->assertFileExists($timestampfile);
         $this->assertTimeCurrent(filemtime($timestampfile));
 
@@ -124,7 +127,7 @@ class core_setuplib_testcase extends advanced_testcase {
         $CFG->localcachedir = "$CFG->dataroot/testlocalcache";
         $this->setCurrentTimeStart();
         $timestampfile = "$CFG->localcachedir/.lastpurged";
-        $this->assertFileNotExists($timestampfile);
+        $this->assertFileDoesNotExist($timestampfile);
 
         $dir = make_localcache_directory('', false);
         $this->assertSame($CFG->localcachedir, $dir);
@@ -147,8 +150,8 @@ class core_setuplib_testcase extends advanced_testcase {
         $now = $this->setCurrentTimeStart();
         set_config('localcachedirpurged', $now - 2);
         purge_all_caches();
-        $this->assertFileNotExists($testfile);
-        $this->assertFileNotExists(dirname($testfile));
+        $this->assertFileDoesNotExist($testfile);
+        $this->assertFileDoesNotExist(dirname($testfile));
         $this->assertFileExists($timestampfile);
         $this->assertTimeCurrent(filemtime($timestampfile));
         $this->assertTimeCurrent($CFG->localcachedirpurged);
@@ -164,8 +167,8 @@ class core_setuplib_testcase extends advanced_testcase {
         $this->setCurrentTimeStart();
         $dir = make_localcache_directory('', false);
         $this->assertSame("$CFG->localcachedir", $dir);
-        $this->assertFileNotExists($testfile);
-        $this->assertFileNotExists(dirname($testfile));
+        $this->assertFileDoesNotExist($testfile);
+        $this->assertFileDoesNotExist(dirname($testfile));
         $this->assertFileExists($timestampfile);
         $this->assertTimeCurrent(filemtime($timestampfile));
     }
@@ -174,16 +177,15 @@ class core_setuplib_testcase extends advanced_testcase {
         global $CFG;
 
         // Start with a file instead of a directory.
-        $base = $CFG->tempdir . DIRECTORY_SEPARATOR . md5(microtime() + rand());
+        $base = $CFG->tempdir . DIRECTORY_SEPARATOR . md5(microtime(true) + rand());
         touch($base);
 
         // First the false test.
         $this->assertFalse(make_unique_writable_directory($base, false));
 
         // Now check for exception.
-        $this->setExpectedException('invalid_dataroot_permissions',
-                $base . ' is not writable. Unable to create a unique directory within it.'
-            );
+        $this->expectException('invalid_dataroot_permissions');
+        $this->expectExceptionMessage($base . ' is not writable. Unable to create a unique directory within it.');
         make_unique_writable_directory($base);
 
         unlink($base);
@@ -206,6 +208,8 @@ class core_setuplib_testcase extends advanced_testcase {
     }
 
     public function test_get_request_storage_directory() {
+        $this->resetAfterTest(true);
+
         // Making a call to get_request_storage_directory should always give the same result.
         $firstdir = get_request_storage_directory();
         $seconddir = get_request_storage_directory();
@@ -232,6 +236,11 @@ class core_setuplib_testcase extends advanced_testcase {
         $fourthdir = get_request_storage_directory();
         $this->assertTrue(is_dir($fourthdir));
         $this->assertNotEquals($thirddir, $fourthdir);
+
+        $now = $this->setCurrentTimeStart();
+        set_config('localcachedirpurged', $now - 2);
+        purge_all_caches();
+        $this->assertTrue(is_dir($fourthdir));
     }
 
 
@@ -358,9 +367,7 @@ class core_setuplib_testcase extends advanced_testcase {
     public function test_get_exception_info_link() {
         global $CFG, $SESSION;
 
-        $initialloginhttps = $CFG->loginhttps;
         $httpswwwroot = str_replace('http:', 'https:', $CFG->wwwroot);
-        $CFG->loginhttps = false;
 
         // Simple local URL.
         $url = $CFG->wwwroot . '/something/here?really=yes';
@@ -374,14 +381,15 @@ class core_setuplib_testcase extends advanced_testcase {
         $infos = $this->get_exception_info($exception);
         $this->assertSame($CFG->wwwroot . '/', $infos->link);
 
-        // HTTPS URL when login HTTPS is not enabled.
+        // HTTPS URL when login HTTPS is not enabled (default) and site is HTTP.
+        $CFG->wwwroot = str_replace('https:', 'http:', $CFG->wwwroot);
         $url = $httpswwwroot . '/something/here?really=yes';
         $exception = new moodle_exception('none', 'error', $url);
         $infos = $this->get_exception_info($exception);
         $this->assertSame($CFG->wwwroot . '/', $infos->link);
 
-        // HTTPS URL with login HTTPS.
-        $CFG->loginhttps = true;
+        // HTTPS URL when login HTTPS is not enabled and site is HTTPS.
+        $CFG->wwwroot = str_replace('http:', 'https:', $CFG->wwwroot);
         $url = $httpswwwroot . '/something/here?really=yes';
         $exception = new moodle_exception('none', 'error', $url);
         $infos = $this->get_exception_info($exception);
@@ -417,13 +425,6 @@ class core_setuplib_testcase extends advanced_testcase {
         $infos = $this->get_exception_info($exception);
         $this->assertSame($url, $infos->link);
 
-        // Internal HTTPS link from fromurl without login HTTPS.
-        $CFG->loginhttps = false;
-        $SESSION->fromurl = $httpswwwroot . '/something/here?really=yes';
-        $exception = new moodle_exception('none');
-        $infos = $this->get_exception_info($exception);
-        $this->assertSame($CFG->wwwroot . '/', $infos->link);
-
         // External link from fromurl.
         $SESSION->fromurl = 'http://moodle.org/something/here?really=yes';
         $exception = new moodle_exception('none');
@@ -436,14 +437,6 @@ class core_setuplib_testcase extends advanced_testcase {
         $infos = $this->get_exception_info($exception);
         $this->assertSame($CFG->wwwroot . '/', $infos->link);
 
-        // External HTTPS link from fromurl with login HTTPS.
-        $CFG->loginhttps = true;
-        $SESSION->fromurl = 'https://moodle.org/something/here?really=yes';
-        $exception = new moodle_exception('none');
-        $infos = $this->get_exception_info($exception);
-        $this->assertSame($CFG->wwwroot . '/', $infos->link);
-
-        $CFG->loginhttps = $initialloginhttps;
         $SESSION->fromurl = '';
     }
 
@@ -459,5 +452,105 @@ class core_setuplib_testcase extends advanced_testcase {
         } catch (moodle_exception $e) {
             return get_exception_info($e);
         }
+    }
+
+    /**
+     * Data provider for test_get_real_size().
+     *
+     * @return array An array of arrays contain test data
+     */
+    public function data_for_test_get_real_size() {
+        return array(
+            array('8KB',    8192),
+            array('8Kb',    8192),
+            array('8K',     8192),
+            array('8k',     8192),
+            array('50MB',   52428800),
+            array('50Mb',   52428800),
+            array('50M',    52428800),
+            array('50m',    52428800),
+            array('8GB',    8589934592),
+            array('8Gb',    8589934592),
+            array('8G',     8589934592),
+            array('7T',     7696581394432),
+            array('7TB',    7696581394432),
+            array('7Tb',    7696581394432),
+            array('6P',     6755399441055744),
+            array('6PB',    6755399441055744),
+            array('6Pb',    6755399441055744),
+        );
+    }
+
+    /**
+     * Test the get_real_size() function.
+     *
+     * @dataProvider data_for_test_get_real_size
+     *
+     * @param string $input the input for get_real_size()
+     * @param int $expectedbytes the expected bytes
+     */
+    public function test_get_real_size($input, $expectedbytes) {
+        $this->assertEquals($expectedbytes, get_real_size($input));
+    }
+
+    /**
+     * Validate the given V4 UUID.
+     *
+     * @param string $value The candidate V4 UUID
+     * @return bool True if valid; otherwise, false.
+     */
+    protected static function is_valid_uuid_v4($value) {
+        // Version 4 UUIDs have the form xxxxxxxx-xxxx-4xxx-Yxxx-xxxxxxxxxxxx
+        // where x is any hexadecimal digit and Y is one of 8, 9, aA, or bB.
+        // First, the size is 36 (32 + 4 dashes).
+        if (strlen($value) != 36) {
+            return false;
+        }
+        // Finally, check the format.
+        $uuidv4pattern = '/^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/i';
+        return (preg_match($uuidv4pattern, $value) === 1);
+    }
+
+    /**
+     * Test the \core\uuid::generate_uuid_via_pecl_uuid_extension() function.
+     */
+    public function test_core_uuid_generate_uuid_via_pecl_uuid_extension() {
+        if (!extension_loaded('uuid')) {
+            $this->markTestSkipped("PHP 'uuid' extension not loaded.");
+        }
+        if (!function_exists('uuid_time')) {
+            $this->markTestSkipped("PHP PECL 'uuid' extension not loaded.");
+        }
+
+        // The \core\uuid::generate_uuid_via_pecl_uuid_extension static method is protected. Use Reflection to call the method.
+        $method = new ReflectionMethod('\core\uuid', 'generate_uuid_via_pecl_uuid_extension');
+        $method->setAccessible(true);
+        $uuid = $method->invoke(null);
+        $this->assertTrue(self::is_valid_uuid_v4($uuid), "Invalid v4 uuid: '$uuid'");
+    }
+
+    /**
+     * Test the \core\uuid::generate_uuid_via_random_bytes() function.
+     */
+    public function test_core_uuid_generate_uuid_via_random_bytes() {
+        try {
+            random_bytes(1);
+        } catch (Exception $e) {
+            $this->markTestSkipped('No source of entropy for random_bytes. ' . $e->getMessage());
+        }
+
+        // The \core\uuid::generate_uuid_via_random_bytes static method is protected. Use Reflection to call the method.
+        $method = new ReflectionMethod('\core\uuid', 'generate_uuid_via_random_bytes');
+        $method->setAccessible(true);
+        $uuid = $method->invoke(null);
+        $this->assertTrue(self::is_valid_uuid_v4($uuid), "Invalid v4 uuid: '$uuid'");
+    }
+
+    /**
+     * Test the \core\uuid::generate() function.
+     */
+    public function test_core_uuid_generate() {
+        $uuid = \core\uuid::generate();
+        $this->assertTrue(self::is_valid_uuid_v4($uuid), "Invalid v4 UUID: '$uuid'");
     }
 }

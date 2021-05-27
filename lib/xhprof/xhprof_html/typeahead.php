@@ -26,7 +26,9 @@ require_once(dirname(dirname(dirname(dirname(__FILE__)))).'/config.php');
 require_once($CFG->libdir . '/xhprof/xhprof_moodle.php');
 require_login();
 require_capability('moodle/site:config', context_system::instance());
+\core\session\manager::write_close();
 // End moodle modification.
+
 
 // by default assume that xhprof_html & xhprof_lib directories
 // are at the same level.
@@ -35,7 +37,6 @@ $GLOBALS['XHPROF_LIB_ROOT'] = dirname(__FILE__) . '/../xhprof_lib';
 require_once $GLOBALS['XHPROF_LIB_ROOT'].'/display/xhprof.php';
 
 // Start moodle modification: use own XHProfRuns implementation.
-// $xhprof_runs_impl = new XHProfRuns_Default();
 $xhprof_runs_impl = new moodle_xhprofrun();
 // End moodle modification.
 

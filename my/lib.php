@@ -80,12 +80,16 @@ function my_copy_page($userid, $private=MY_PAGE_PRIVATE, $pagetype='my-index') {
     $blockinstances = $DB->get_records('block_instances', array('parentcontextid' => $systemcontext->id,
                                                                 'pagetypepattern' => $pagetype,
                                                                 'subpagepattern' => $systempage->id));
+    $newblockinstanceids = [];
     foreach ($blockinstances as $instance) {
         $originalid = $instance->id;
         unset($instance->id);
         $instance->parentcontextid = $usercontext->id;
         $instance->subpagepattern = $page->id;
+        $instance->timecreated = time();
+        $instance->timemodified = $instance->timecreated;
         $instance->id = $DB->insert_record('block_instances', $instance);
+        $newblockinstanceids[$originalid] = $instance->id;
         $blockcontext = context_block::instance($instance->id);  // Just creates the context record
         $block = block_instance($instance->blockname, $instance);
         if (!$block->instance_copy($originalid)) {
@@ -94,12 +98,21 @@ function my_copy_page($userid, $private=MY_PAGE_PRIVATE, $pagetype='my-index') {
         }
     }
 
-    // FIXME: block position overrides should be merged in with block instance
-    //$blockpositions = $DB->get_records('block_positions', array('subpage' => $page->name));
-    //foreach($blockpositions as $positions) {
-    //    $positions->subpage = $page->name;
-    //    $DB->insert_record('block_positions', $tc);
-    //}
+    // Clone block position overrides.
+    if ($blockpositions = $DB->get_records('block_positions',
+            ['subpage' => $systempage->id, 'pagetype' => $pagetype, 'contextid' => $systemcontext->id])) {
+        foreach ($blockpositions as &$positions) {
+            $positions->subpage = $page->id;
+            $positions->contextid = $usercontext->id;
+            if (array_key_exists($positions->blockinstanceid, $newblockinstanceids)) {
+                // For block instances that were defined on the default dashboard and copied to the user dashboard
+                // use the new blockinstanceid.
+                $positions->blockinstanceid = $newblockinstanceids[$positions->blockinstanceid];
+            }
+            unset($positions->id);
+        }
+        $DB->insert_records('block_positions', $blockpositions);
+    }
 
     return $page;
 }
@@ -126,6 +139,7 @@ function my_reset_page($userid, $private=MY_PAGE_PRIVATE, $pagetype='my-index') 
                 }
             }
         }
+        $DB->delete_records('block_positions', ['subpage' => $page->id, 'pagetype' => $pagetype, 'contextid' => $context->id]);
         $DB->delete_records('my_pages', array('id' => $page->id));
     }
 
@@ -133,6 +147,17 @@ function my_reset_page($userid, $private=MY_PAGE_PRIVATE, $pagetype='my-index') 
     if (!$systempage = $DB->get_record('my_pages', array('userid' => null, 'private' => $private))) {
         return false; // error
     }
+
+    // Trigger dashboard has been reset event.
+    $eventparams = array(
+        'context' => context_user::instance($userid),
+        'other' => array(
+            'private' => $private,
+            'pagetype' => $pagetype,
+        ),
+    );
+    $event = \core\event\dashboard_reset::create($eventparams);
+    $event->trigger();
     return $systempage;
 }
 
@@ -141,50 +166,85 @@ function my_reset_page($userid, $private=MY_PAGE_PRIVATE, $pagetype='my-index') 
  *
  * @param int $private Either MY_PAGE_PRIVATE or MY_PAGE_PUBLIC.
  * @param string $pagetype Either my-index or user-profile.
+ * @param progress_bar $progressbar A progress bar to update.
  * @return void
  */
-function my_reset_page_for_all_users($private = MY_PAGE_PRIVATE, $pagetype = 'my-index') {
+function my_reset_page_for_all_users($private = MY_PAGE_PRIVATE, $pagetype = 'my-index', $progressbar = null) {
     global $DB;
 
-    // Find all the user pages.
-    $where = 'userid IS NOT NULL AND private = :private';
-    $params = array('private' => $private);
-    $pages = $DB->get_recordset_select('my_pages', $where, $params, 'id, userid');
-    $pageids = array();
-    $blockids = array();
+    // This may take a while. Raise the execution time limit.
+    core_php_time_limit::raise();
 
-    foreach ($pages as $page) {
-        $pageids[] = $page->id;
-        $usercontext = context_user::instance($page->userid);
+    $users = $DB->get_fieldset_select(
+        'my_pages',
+        'DISTINCT(userid)',
+        'userid IS NOT NULL AND private = :private',
+        ['private' => $private]
+    );
+    $chunks = array_chunk($users, 20);
 
-        // Find all block instances in that page.
-        $blocks = $DB->get_recordset('block_instances', array('parentcontextid' => $usercontext->id,
-            'pagetypepattern' => $pagetype), '', 'id, subpagepattern');
-        foreach ($blocks as $block) {
-            if (is_null($block->subpagepattern) || $block->subpagepattern == $page->id) {
-                $blockids[] = $block->id;
-            }
+    if (!empty($progressbar) && count($chunks) > 0) {
+        $count = count($chunks);
+        $message = get_string('inprogress');
+        $progressbar->update(0, $count, $message);
+    }
+
+    foreach ($chunks as $key => $userchunk) {
+        list($infragment, $inparams) = $DB->get_in_or_equal($userchunk,  SQL_PARAMS_NAMED);
+        // Find all the user pages and all block instances in them.
+        $sql = "SELECT bi.id
+                  FROM {my_pages} p
+                  JOIN {context} ctx ON ctx.instanceid = p.userid AND ctx.contextlevel = :usercontextlevel
+                  JOIN {block_instances} bi ON bi.parentcontextid = ctx.id
+                   AND bi.pagetypepattern = :pagetypepattern
+                   AND (bi.subpagepattern IS NULL OR bi.subpagepattern = " . $DB->sql_concat("''", 'p.id') . ")
+                 WHERE p.private = :private
+                   AND p.userid $infragment";
+
+        $params = array_merge([
+            'private' => $private,
+            'usercontextlevel' => CONTEXT_USER,
+            'pagetypepattern' => $pagetype
+        ], $inparams);
+        $blockids = $DB->get_fieldset_sql($sql, $params);
+
+        // Wrap the SQL queries in a transaction.
+        $transaction = $DB->start_delegated_transaction();
+
+        // Delete the block instances.
+        if (!empty($blockids)) {
+            blocks_delete_instances($blockids);
         }
-        $blocks->close();
-    }
-    $pages->close();
 
-    // Wrap the SQL queries in a transaction.
-    $transaction = $DB->start_delegated_transaction();
+        // Finally delete the pages.
+        $DB->delete_records_select(
+            'my_pages',
+            "userid $infragment AND private = :private",
+            array_merge(['private' => $private], $inparams)
+        );
 
-    // Delete the block instances.
-    if (!empty($blockids)) {
-        blocks_delete_instances($blockids);
-    }
+        // We should be good to go now.
+        $transaction->allow_commit();
 
-    // Finally delete the pages.
-    if (!empty($pageids)) {
-        list($insql, $inparams) = $DB->get_in_or_equal($pageids);
-        $DB->delete_records_select('my_pages', "id $insql", $pageids);
+        if (!empty($progressbar)) {
+            $progressbar->update(((int) $key + 1), $count, $message);
+        }
     }
 
-    // We should be good to go now.
-    $transaction->allow_commit();
+    // Trigger dashboard has been reset event.
+    $eventparams = array(
+        'context' => context_system::instance(),
+        'other' => array(
+            'private' => $private,
+            'pagetype' => $pagetype,
+        ),
+    );
+    $event = \core\event\dashboards_reset::create($eventparams);
+    $event->trigger();
+
+    if (!empty($progressbar)) {
+        $progressbar->update(1, 1, get_string('completed'));
+    }
 }
 
 class my_syspage_block_manager extends block_manager {

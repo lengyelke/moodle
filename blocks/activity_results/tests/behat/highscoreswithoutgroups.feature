@@ -1,5 +1,5 @@
 @block @block_activity_results
-Feature: The activity results block displays student scores
+Feature: The activity results block displays student high scores
   In order to be display student scores
   As a user
   I need to see the activity results block
@@ -24,15 +24,12 @@ Feature: The activity results block displays student scores
       | student3 | C1 | student |
       | student4 | C1 | student |
       | student5 | C1 | student |
+    And the following "activities" exist:
+      | activity   | name            | intro          | course | section | idnumber | assignsubmission_file_enabled |
+      | assign     | Test assignment | Offline text   | C1     | 1       | assign1  | 0                             |
     And I log in as "teacher1"
-    And I follow "Course 1"
-    And I turn editing mode on
-    And I add a "Assignment" to section "1" and I fill the form with:
-      | Assignment name | Test assignment |
-      | Description | Offline text |
-      | assignsubmission_file_enabled | 0 |
-    And I follow "Course 1"
-    And I navigate to "Grades" node in "Course administration"
+    And I am on "Course 1" course homepage with editing mode on
+    And I navigate to "View > Grader report" in the course gradebook
     And I turn editing mode on
     And I give the grade "90.00" to the user "Student 1" for the grade item "Test assignment"
     And I give the grade "80.00" to the user "Student 2" for the grade item "Test assignment"
@@ -40,7 +37,7 @@ Feature: The activity results block displays student scores
     And I give the grade "60.00" to the user "Student 4" for the grade item "Test assignment"
     And I give the grade "50.00" to the user "Student 5" for the grade item "Test assignment"
     And I press "Save changes"
-    And I follow "Course 1"
+    And I am on "Course 1" course homepage
 
   Scenario: Configure the block on the course page to show 0 high scores
     Given I add the "Activity results" block
@@ -140,7 +137,9 @@ Feature: The activity results block displays student scores
     And I should see "70.00" in the "Activity results" "block"
 
   Scenario: Try to configure the block on the course page to show multiple high scores using ID numbers
-    Given I add the "Activity results" block
+    Given the following config values are set as admin:
+      | showuseridentity | idnumber,email |
+    And I add the "Activity results" block
     When I configure the "Activity results" block
     And I set the following fields to these values:
       | id_config_showbest | 3 |

@@ -173,7 +173,7 @@ abstract class backup_structure_step extends backup_step {
      * looking for /mod/modulenanme subplugins. This new method is a generalization of the
      * existing one for activities, supporting all subplugins injecting information everywhere.
      *
-     * @param string $subplugintype type of subplugin as defined in plugin's db/subplugins.php.
+     * @param string $subplugintype type of subplugin as defined in plugin's db/subplugins.json.
      * @param backup_nested_element $element element in the backup tree (anywhere) that
      *                                       we are going to add subplugin information to.
      * @param bool $multiple to define if multiple subplugins can produce information
@@ -183,6 +183,10 @@ abstract class backup_structure_step extends backup_step {
      * @return void
      */
     protected function add_subplugin_structure($subplugintype, $element, $multiple, $plugintype = null, $pluginname = null) {
+        global $CFG;
+        // This global declaration is required, because where we do require_once($backupfile);
+        // That file may in turn try to do require_once($CFG->dirroot ...).
+        // That worked in the past, we should keep it working.
 
         // Verify if this is a BC call for an activity backup. See NOTE above for this special case.
         if ($plugintype === null and $pluginname === null) {
@@ -202,11 +206,10 @@ abstract class backup_structure_step extends backup_step {
         }
 
         // Check the requested subplugintype is a valid one.
-        $subpluginsfile = core_component::get_component_directory($plugintype . '_' . $pluginname) . '/db/subplugins.php';
-        if (!file_exists($subpluginsfile)) {
-             throw new backup_step_exception('plugin_missing_subplugins_php_file', array($plugintype, $pluginname));
+        $subplugins = core_component::get_subplugins("{$plugintype}_{$pluginname}");
+        if (null === $subplugins) {
+            throw new backup_step_exception('plugin_missing_subplugins_configuration', [$plugintype, $pluginname]);
         }
-        include($subpluginsfile);
         if (!array_key_exists($subplugintype, $subplugins)) {
              throw new backup_step_exception('incorrect_subplugin_type', $subplugintype);
         }

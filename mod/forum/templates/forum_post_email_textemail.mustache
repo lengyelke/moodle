@@ -30,7 +30,7 @@
     * forumname
     * showdiscussionname
     * discussionname
-    * discussionlink
+    * permalink
     * subject
     * authorfullname
     * postdate
@@ -41,18 +41,28 @@
     * unsubscribeforumlink
     * unsubscribediscussionlink
     * forumindexlink
+    * isprivatereply
 }}
 {{{ coursename }}} -> {{# str }} forums, forum {{/ str }} -> {{{ forumname }}}{{# showdiscussionname }} -> {{{ discussionname }}} {{/ showdiscussionname }}
-{{ discussionlink }}
+{{ permalink }}
 {{{ subject }}}
-{{# str }} bynameondate, forum, { "name": "{{{ authorfullname }}}", "date": "{{ postdate }}" } {{/ str }}
+{{# str }} bynameondate, forum, {
+        "name": {{# quote }}{{{ authorfullname }}}{{/ quote }},
+        "date": {{# quote}}{{ postdate }}{{/ quote }}
+    } {{/ str }}
+{{# isprivatereply }}
+{{# str }} postisprivatereply, forum {{/ str }}
+{{/ isprivatereply }}
 ---------------------------------------------------------------------
 {{{ message }}}
 
 {{{ attachments }}}
 ---------------------------------------------------------------------
 {{# canreply }}
-{{# str }} postmailinfolink, forum, { "coursename": "{{{ coursename }}}", "replylink": "{{ replylink }}" } {{/ str }}
+{{# str }} postmailinfolink, forum, {
+        "coursename": {{# quote }}{{{ coursename }}}{{/ quote }},
+        "replylink": {{# quote }}{{ replylink }}{{/ quote }}
+    } {{/ str }}
 {{/ canreply }}
 {{# unsubscribeforumlink }}
 {{# str }} unsubscribelink, forum, {{{ unsubscribeforumlink }}} {{/ str }}

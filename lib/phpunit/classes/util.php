@@ -24,6 +24,7 @@
  */
 
 require_once(__DIR__.'/../../testing/classes/util.php');
+require_once(__DIR__ . "/coverage_info.php");
 
 /**
  * Collection of utility methods.
@@ -62,7 +63,7 @@ class phpunit_util extends testing_util {
     /**
      * @var array Files to skip when dropping dataroot folder
      */
-    protected static $datarootskipondrop = array('.', '..', 'lock', 'webrunner.xml');
+    protected static $datarootskipondrop = array('.', '..', 'lock');
 
     /**
      * Load global $CFG;
@@ -101,7 +102,7 @@ class phpunit_util extends testing_util {
      * @return void
      */
     public static function reset_all_data($detectchanges = false) {
-        global $DB, $CFG, $USER, $SITE, $COURSE, $PAGE, $OUTPUT, $SESSION;
+        global $DB, $CFG, $USER, $SITE, $COURSE, $PAGE, $OUTPUT, $SESSION, $FULLME, $FILTERLIB_PRIVATE;
 
         // Stop any message redirection.
         self::stop_message_redirection();
@@ -164,6 +165,10 @@ class phpunit_util extends testing_util {
                 $warnings[] = 'Warning: unexpected change of $COURSE';
             }
 
+            if ($FULLME !== self::get_global_backup('FULLME')) {
+                $warnings[] = 'Warning: unexpected change of $FULLME';
+            }
+
             if (setlocale(LC_TIME, 0) !== $localename) {
                 $warnings[] = 'Warning: unexpected change of locale';
             }
@@ -184,6 +189,7 @@ class phpunit_util extends testing_util {
         $_SERVER = self::get_global_backup('_SERVER');
         $CFG = self::get_global_backup('CFG');
         $SITE = self::get_global_backup('SITE');
+        $FULLME = self::get_global_backup('FULLME');
         $_GET = array();
         $_POST = array();
         $_FILES = array();
@@ -196,6 +202,7 @@ class phpunit_util extends testing_util {
         $FULLME = null;
         $ME = null;
         $SCRIPT = null;
+        $FILTERLIB_PRIVATE = null;
 
         // Empty sessison and set fresh new not-logged-in user.
         \core\session\manager::init_empty_session();
@@ -203,13 +210,19 @@ class phpunit_util extends testing_util {
         // reset all static caches
         \core\event\manager::phpunit_reset();
         accesslib_clear_all_caches(true);
+        accesslib_reset_role_cache();
         get_string_manager()->reset_caches(true);
         reset_text_filters_cache(true);
-        events_get_handlers('reset');
         core_text::reset_caches();
-        get_message_processors(false, true);
+        get_message_processors(false, true, true);
         filter_manager::reset_caches();
         core_filetypes::reset_caches();
+        \core_search\manager::clear_static();
+        core_user::reset_caches();
+        \core\output\icon_system::reset_caches();
+        if (class_exists('core_media_manager', false)) {
+            core_media_manager::reset_caches();
+        }
 
         // Reset static unit test options.
         if (class_exists('\availability_date\condition', false)) {
@@ -219,13 +232,15 @@ class phpunit_util extends testing_util {
         // Reset internal users.
         core_user::reset_internal_users();
 
+        // Clear static caches in calendar container.
+        if (class_exists('\core_calendar\local\event\container', false)) {
+            core_calendar\local\event\container::reset_caches();
+        }
+
         //TODO MDL-25290: add more resets here and probably refactor them to new core function
 
         // Reset course and module caches.
-        if (class_exists('format_base')) {
-            // If file containing class is not loaded, there is no cache there anyway.
-            format_base::reset_course_cache(0);
-        }
+        core_course\course_format::reset_course_cache(0);
         get_fast_modinfo(0, 0, true);
 
         // Reset other singletons.
@@ -234,6 +249,9 @@ class phpunit_util extends testing_util {
         }
         if (class_exists('\core\update\checker')) {
             \core\update\checker::reset_caches(true);
+        }
+        if (class_exists('\core_course\customfield\course_handler')) {
+            \core_course\customfield\course_handler::reset_caches();
         }
 
         // Clear static cache within restore.
@@ -258,6 +276,12 @@ class phpunit_util extends testing_util {
 
         // Make sure the time locale is consistent - that is Australian English.
         setlocale(LC_TIME, $localename);
+
+        // Reset the log manager cache.
+        get_log_manager(true);
+
+        // Reset user agent.
+        core_useragent::instance(true, null);
 
         // verify db writes just in case something goes wrong in reset
         if (self::$lastdbwrites != $DB->perf_get_writes()) {
@@ -299,13 +323,14 @@ class phpunit_util extends testing_util {
      * @return void
      */
     public static function bootstrap_init() {
-        global $CFG, $SITE, $DB;
+        global $CFG, $SITE, $DB, $FULLME;
 
         // backup the globals
         self::$globals['_SERVER'] = $_SERVER;
         self::$globals['CFG'] = clone($CFG);
         self::$globals['SITE'] = clone($SITE);
         self::$globals['DB'] = $DB;
+        self::$globals['FULLME'] = $FULLME;
 
         // refresh data in all tables, clear caches, etc.
         self::reset_all_data();
@@ -398,10 +423,12 @@ class phpunit_util extends testing_util {
 
         self::reset_dataroot();
         testing_initdataroot($CFG->dataroot, 'phpunit');
-        self::drop_dataroot();
 
-        // drop all tables
+        // Drop all tables.
         self::drop_database($displayprogress);
+
+        // Drop dataroot.
+        self::drop_dataroot();
     }
 
     /**
@@ -453,50 +480,84 @@ class phpunit_util extends testing_util {
     }
 
     /**
-     * Builds dirroot/phpunit.xml and dataroot/phpunit/webrunner.xml files using defaults from /phpunit.xml.dist
+     * Builds dirroot/phpunit.xml file using defaults from /phpunit.xml.dist
      * @static
      * @return bool true means main config file created, false means only dataroot file created
      */
     public static function build_config_file() {
         global $CFG;
 
-        $template = '
-        <testsuite name="@component@_testsuite">
-            <directory suffix="_test.php">@dir@</directory>
-        </testsuite>';
+        $template = <<<EOF
+            <testsuite name="@component@_testsuite">
+              <directory suffix="_test.php">@dir@</directory>
+            </testsuite>
+
+        EOF;
         $data = file_get_contents("$CFG->dirroot/phpunit.xml.dist");
 
         $suites = '';
+        $includelists = [];
+        $excludelists = [];
+
+        $subsystems = core_component::get_core_subsystems();
+        $subsystems['core'] = $CFG->dirroot . '/lib';
+        foreach ($subsystems as $subsystem => $fulldir) {
+            if (empty($fulldir)) {
+                continue;
+            }
+            if (!file_exists("{$fulldir}/tests/")) {
+                // There are no tests - skip this directory.
+                continue;
+            }
+
+            $dir = substr($fulldir, strlen($CFG->dirroot) + 1);
+            if ($coverageinfo = self::get_coverage_info($fulldir)) {
+                $includelists = array_merge($includelists, $coverageinfo->get_includelists($dir));
+                $excludelists = array_merge($excludelists, $coverageinfo->get_excludelists($dir));
+            }
+        }
 
         $plugintypes = core_component::get_plugin_types();
         ksort($plugintypes);
-        foreach ($plugintypes as $type=>$unused) {
+        foreach (array_keys($plugintypes) as $type) {
             $plugs = core_component::get_plugin_list($type);
             ksort($plugs);
-            foreach ($plugs as $plug=>$fullplug) {
-                if (!file_exists("$fullplug/tests/")) {
+            foreach ($plugs as $plug => $plugindir) {
+                if (!file_exists("{$plugindir}/tests/")) {
+                    // There are no tests - skip this directory.
                     continue;
                 }
-                $dir = substr($fullplug, strlen($CFG->dirroot)+1);
-                $dir .= '/tests';
-                $component = $type.'_'.$plug;
+
+                $dir = substr($plugindir, strlen($CFG->dirroot) + 1);
+                $testdir = "{$dir}/tests";
+                $component = "{$type}_{$plug}";
 
                 $suite = str_replace('@component@', $component, $template);
-                $suite = str_replace('@dir@', $dir, $suite);
+                $suite = str_replace('@dir@', $testdir, $suite);
 
                 $suites .= $suite;
+
+                if ($coverageinfo = self::get_coverage_info($plugindir)) {
+
+                    $includelists = array_merge($includelists, $coverageinfo->get_includelists($dir));
+                    $excludelists = array_merge($excludelists, $coverageinfo->get_excludelists($dir));
+                }
             }
         }
+
         // Start a sequence between 100000 and 199000 to ensure each call to init produces
         // different ids in the database.  This reduces the risk that hard coded values will
         // end up being placed in phpunit or behat test code.
         $sequencestart = 100000 + mt_rand(0, 99) * 1000;
 
-        $data = preg_replace('|<!--@plugin_suites_start@-->.*<!--@plugin_suites_end@-->|s', $suites, $data, 1);
+        $data = preg_replace('| *<!--@plugin_suites_start@-->.*<!--@plugin_suites_end@-->|s', trim($suites, "\n"), $data, 1);
         $data = str_replace(
             '<const name="PHPUNIT_SEQUENCE_START" value=""/>',
             '<const name="PHPUNIT_SEQUENCE_START" value="' . $sequencestart . '"/>',
             $data);
+
+        $coverages = self::get_coverage_config($includelists, $excludelists);
+        $data = preg_replace('| *<!--@coveragelist@-->|s', trim($coverages, "\n"), $data);
 
         $result = false;
         if (is_writable($CFG->dirroot)) {
@@ -504,14 +565,6 @@ class phpunit_util extends testing_util {
                 testing_fix_file_permissions("$CFG->dirroot/phpunit.xml");
             }
         }
-
-        // relink - it seems that xml:base does not work in phpunit xml files, remove this nasty hack if you find a way to set xml base for relative refs
-        $data = str_replace('lib/phpunit/', $CFG->dirroot.DIRECTORY_SEPARATOR.'lib'.DIRECTORY_SEPARATOR.'phpunit'.DIRECTORY_SEPARATOR, $data);
-        $data = preg_replace('|<directory suffix="_test.php">([^<]+)</directory>|',
-            '<directory suffix="_test.php">'.$CFG->dirroot.(DIRECTORY_SEPARATOR === '\\' ? '\\\\' : DIRECTORY_SEPARATOR).'$1</directory>',
-            $data);
-        file_put_contents("$CFG->dataroot/phpunit/webrunner.xml", $data);
-        testing_fix_file_permissions("$CFG->dataroot/phpunit/webrunner.xml");
 
         return (bool)$result;
     }
@@ -525,12 +578,21 @@ class phpunit_util extends testing_util {
     public static function build_component_config_files() {
         global $CFG;
 
-        $template = '
-        <testsuites>
-            <testsuite name="@component@_testsuite">
+        $template = <<<EOT
+            <testsuites>
+              <testsuite name="@component@_testsuite">
                 <directory suffix="_test.php">.</directory>
-            </testsuite>
-        </testsuites>';
+              </testsuite>
+            </testsuites>
+          EOT;
+        $coveragedefault = <<<EOT
+            <include>
+              <directory suffix=".php">.</directory>
+            </include>
+            <exclude>
+              <directory suffix="_test.php">.</directory>
+            </exclude>
+        EOT;
 
         // Start a sequence between 100000 and 199000 to ensure each call to init produces
         // different ids in the database.  This reduces the risk that hard coded values will
@@ -539,7 +601,7 @@ class phpunit_util extends testing_util {
 
         // Use the upstream file as source for the distributed configurations
         $ftemplate = file_get_contents("$CFG->dirroot/phpunit.xml.dist");
-        $ftemplate = preg_replace('|<!--All core suites.*</testsuites>|s', '<!--@component_suite@-->', $ftemplate);
+        $ftemplate = preg_replace('| *<!--All core suites.*</testsuites>|s', '<!--@component_suite@-->', $ftemplate);
 
         // Gets all the components with tests
         $components = tests_finder::get_components_with_tests('phpunit');
@@ -550,8 +612,17 @@ class phpunit_util extends testing_util {
             $ctemplate = $template;
             $ctemplate = str_replace('@component@', $cname, $ctemplate);
 
-            // Apply it to the file template
             $fcontents = str_replace('<!--@component_suite@-->', $ctemplate, $ftemplate);
+
+            // Check for coverage configurations.
+            if ($coverageinfo = self::get_coverage_info($cpath)) {
+                $coverages = self::get_coverage_config($coverageinfo->get_includelists(''), $coverageinfo->get_excludelists(''));
+            } else {
+                $coverages = $coveragedefault;
+            }
+            $fcontents = preg_replace('| *<!--@coveragelist@-->|s', trim($coverages, "\n"), $fcontents);
+
+            // Apply it to the file template.
             $fcontents = str_replace(
                 '<const name="PHPUNIT_SEQUENCE_START" value=""/>',
                 '<const name="PHPUNIT_SEQUENCE_START" value="' . $sequencestart . '"/>',
@@ -587,28 +658,19 @@ class phpunit_util extends testing_util {
         $backtrace = debug_backtrace();
 
         foreach ($backtrace as $bt) {
-            $intest = false;
-            if (isset($bt['object']) and is_object($bt['object'])) {
-                if ($bt['object'] instanceof PHPUnit_Framework_TestCase) {
-                    if (strpos($bt['function'], 'test') === 0) {
-                        $intest = true;
-                        break;
-                    }
-                }
+            if (isset($bt['object']) and is_object($bt['object'])
+                    && $bt['object'] instanceof PHPUnit\Framework\TestCase) {
+                $debug = new stdClass();
+                $debug->message = $message;
+                $debug->level   = $level;
+                $debug->from    = $from;
+
+                self::$debuggings[] = $debug;
+
+                return true;
             }
         }
-        if (!$intest) {
-            return false;
-        }
-
-        $debug = new stdClass();
-        $debug->message = $message;
-        $debug->level   = $level;
-        $debug->from    = $from;
-
-        self::$debuggings[] = $debug;
-
-        return true;
+        return false;
     }
 
     /**
@@ -629,16 +691,24 @@ class phpunit_util extends testing_util {
 
     /**
      * Prints out any debug messages accumulated during test execution.
-     * @return bool false if no debug messages, true if debug triggered
+     *
+     * @param bool $return true to return the messages or false to print them directly. Default false.
+     * @return bool|string false if no debug messages, true if debug triggered or string of messages
      */
-    public static function display_debugging_messages() {
+    public static function display_debugging_messages($return = false) {
         if (empty(self::$debuggings)) {
             return false;
         }
+
+        $debugstring = '';
         foreach(self::$debuggings as $debug) {
-            echo 'Debugging: ' . $debug->message . "\n" . trim($debug->from) . "\n";
+            $debugstring .= 'Debugging: ' . $debug->message . "\n" . trim($debug->from) . "\n";
         }
 
+        if ($return) {
+            return $debugstring;
+        }
+        echo $debugstring;
         return true;
     }
 
@@ -682,7 +752,7 @@ class phpunit_util extends testing_util {
     /**
      * To be called from messagelib.php only!
      *
-     * @param stdClass $message record from message_read table
+     * @param stdClass $message record from messages table
      * @return bool true means send message, false means message "sent" to sink.
      */
     public static function message_sent($message) {
@@ -733,7 +803,7 @@ class phpunit_util extends testing_util {
     /**
      * To be called from messagelib.php only!
      *
-     * @param stdClass $message record from message_read table
+     * @param stdClass $message record from messages table
      * @return bool true means send message, false means message "sent" to sink.
      */
     public static function phpmailer_sent($message) {
@@ -808,5 +878,115 @@ class phpunit_util extends testing_util {
         } else {
             return 'en_AU.UTF-8';
         }
+    }
+
+    /**
+     * Executes all adhoc tasks in the queue. Useful for testing asynchronous behaviour.
+     *
+     * @return void
+     */
+    public static function run_all_adhoc_tasks() {
+        $now = time();
+        while (($task = \core\task\manager::get_next_adhoc_task($now)) !== null) {
+            try {
+                $task->execute();
+                \core\task\manager::adhoc_task_complete($task);
+            } catch (Exception $e) {
+                \core\task\manager::adhoc_task_failed($task);
+            }
+        }
+    }
+
+    /**
+     * Helper function to call a protected/private method of an object using reflection.
+     *
+     * Example 1. Calling a protected object method:
+     *   $result = call_internal_method($myobject, 'method_name', [$param1, $param2], '\my\namespace\myobjectclassname');
+     *
+     * Example 2. Calling a protected static method:
+     *   $result = call_internal_method(null, 'method_name', [$param1, $param2], '\my\namespace\myclassname');
+     *
+     * @param object|null $object the object on which to call the method, or null if calling a static method.
+     * @param string $methodname the name of the protected/private method.
+     * @param array $params the array of function params to pass to the method.
+     * @param string $classname the fully namespaced name of the class the object was created from (base in the case of mocks),
+     *        or the name of the static class when calling a static method.
+     * @return mixed the respective return value of the method.
+     */
+    public static function call_internal_method($object, $methodname, array $params, $classname) {
+        $reflection = new \ReflectionClass($classname);
+        $method = $reflection->getMethod($methodname);
+        $method->setAccessible(true);
+        return $method->invokeArgs($object, $params);
+    }
+
+    /**
+     * Pad the supplied string with $level levels of indentation.
+     *
+     * @param   string  $string The string to pad
+     * @param   int     $level The number of levels of indentation to pad
+     * @return  string
+     */
+    protected static function pad(string $string, int $level) : string {
+        return str_repeat(" ", $level * 2) . "{$string}\n";
+    }
+
+    /**
+     * Get the coverage config for the supplied includelist and excludelist configuration.
+     *
+     * @param   array[] $includelists The list of files/folders in the includelist.
+     * @param   array[] $excludelists The list of files/folders in the excludelist.
+     * @return  string
+     */
+    protected static function get_coverage_config(array $includelists, array $excludelists) : string {
+        $coverages = '';
+        if (!empty($includelists)) {
+            $coverages .= self::pad("<include>", 2);
+            foreach ($includelists as $line) {
+                $coverages .= self::pad($line, 3);
+            }
+            $coverages .= self::pad("</include>", 2);
+            if (!empty($excludelists)) {
+                $coverages .= self::pad("<exclude>", 2);
+                foreach ($excludelists as $line) {
+                    $coverages .= self::pad($line, 3);
+                }
+                $coverages .= self::pad("</exclude>", 2);
+            }
+        }
+
+        return $coverages;
+    }
+
+    /**
+     * Get the phpunit_coverage_info for the specified plugin or subsystem directory.
+     *
+     * @param   string  $fulldir The directory to find the coverage info file in.
+     * @return  phpunit_coverage_info
+     */
+    protected static function get_coverage_info(string $fulldir): ?phpunit_coverage_info {
+        $coverageconfig = "{$fulldir}/tests/coverage.php";
+        if (file_exists($coverageconfig)) {
+            $coverageinfo = require($coverageconfig);
+            if (!$coverageinfo instanceof phpunit_coverage_info) {
+                throw new \coding_exception("{$coverageconfig} does not return a phpunit_coverage_info");
+            }
+
+            return $coverageinfo;
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether the current process is an isolated test process.
+     *
+     * @return bool
+     */
+    public static function is_in_isolated_process(): bool {
+        // Note: There is no function to call, or much to go by in order to tell whether we are in an isolated process
+        // during Bootstrap, when this function is called.
+        // We can do so by testing the existence of the wrapper function, but there is nothing set until that point.
+        return function_exists('__phpunit_run_isolated_test');
     }
 }

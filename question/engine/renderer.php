@@ -52,7 +52,7 @@ class core_question_renderer extends plugin_renderer_base {
     public function question_preview_link($questionid, context $context, $showlabel) {
         if ($showlabel) {
             $alt = '';
-            $label = ' ' . get_string('preview');
+            $label = get_string('preview');
             $attributes = array();
         } else {
             $alt = get_string('preview');
@@ -89,10 +89,10 @@ class core_question_renderer extends plugin_renderer_base {
 
         $output = '';
         $output .= html_writer::start_tag('div', array(
-            'id' => 'q' . $qa->get_slot(),
+            'id' => $qa->get_outer_question_div_unique_id(),
             'class' => implode(' ', array(
                 'que',
-                $qa->get_question()->qtype->name(),
+                $qa->get_question(false)->get_type_name(),
                 $qa->get_behaviour_name(),
                 $qa->get_state_class($options->correctness && $qa->has_marks()),
             ))
@@ -107,18 +107,18 @@ class core_question_renderer extends plugin_renderer_base {
         $output .= html_writer::tag('div',
                 $this->add_part_heading($qtoutput->formulation_heading(),
                     $this->formulation($qa, $behaviouroutput, $qtoutput, $options)),
-                array('class' => 'formulation'));
+                array('class' => 'formulation clearfix'));
         $output .= html_writer::nonempty_tag('div',
                 $this->add_part_heading(get_string('feedback', 'question'),
                     $this->outcome($qa, $behaviouroutput, $qtoutput, $options)),
-                array('class' => 'outcome'));
+                array('class' => 'outcome clearfix'));
         $output .= html_writer::nonempty_tag('div',
                 $this->add_part_heading(get_string('comments', 'question'),
                     $this->manual_comment($qa, $behaviouroutput, $qtoutput, $options)),
-                array('class' => 'comment'));
+                array('class' => 'comment clearfix'));
         $output .= html_writer::nonempty_tag('div',
                 $this->response_history($qa, $behaviouroutput, $qtoutput, $options),
-                array('class' => 'history'));
+                array('class' => 'history clearfix border p-2'));
 
         $output .= html_writer::end_tag('div');
         $output .= html_writer::end_tag('div');
@@ -144,7 +144,6 @@ class core_question_renderer extends plugin_renderer_base {
         $output .= $this->number($number);
         $output .= $this->status($qa, $behaviouroutput, $options);
         $output .= $this->mark_summary($qa, $behaviouroutput, $options);
-        $output .= $options->extrainfocontent;
         $output .= $this->question_flag($qa, $options->flags);
         $output .= $this->edit_question_link($qa, $options);
         return $output;
@@ -157,15 +156,15 @@ class core_question_renderer extends plugin_renderer_base {
      * @return HTML fragment.
      */
     protected function number($number) {
+        if (trim($number) === '') {
+            return '';
+        }
         $numbertext = '';
-        if (is_numeric($number)) {
+        if (trim($number) === 'i') {
+            $numbertext = get_string('information', 'question');
+        } else {
             $numbertext = get_string('questionx', 'question',
                     html_writer::tag('span', $number, array('class' => 'qno')));
-        } else if ($number == 'i') {
-            $numbertext = get_string('information', 'question');
-        }
-        if (!$numbertext) {
-            return '';
         }
         return html_writer::tag('h3', $numbertext, array('class' => 'no'));
     }
@@ -324,21 +323,23 @@ class core_question_renderer extends plugin_renderer_base {
         if ($flagged) {
             $icon = 'i/flagged';
             $alt = get_string('flagged', 'question');
+            $label = get_string('clickunflag', 'question');
         } else {
             $icon = 'i/unflagged';
             $alt = get_string('notflagged', 'question');
+            $label = get_string('clickflag', 'question');
         }
         $attributes = array(
-            'src' => $this->pix_url($icon),
+            'src' => $this->image_url($icon),
             'alt' => $alt,
+            'class' => 'questionflagimage',
         );
         if ($id) {
             $attributes['id'] = $id;
         }
         $img = html_writer::empty_tag('img', $attributes);
-        if ($flagged) {
-            $img .= ' ' . get_string('flagged', 'question');
-        }
+        $img .= html_writer::span($label);
+
         return $img;
     }
 
@@ -354,7 +355,7 @@ class core_question_renderer extends plugin_renderer_base {
         if ($params['returnurl'] instanceof moodle_url) {
             $params['returnurl'] = $params['returnurl']->out_as_local_url(false);
         }
-        $params['id'] = $qa->get_question()->id;
+        $params['id'] = $qa->get_question_id();
         $editurl = new moodle_url('/question/question.php', $params);
 
         return html_writer::tag('div', html_writer::link(
@@ -412,6 +413,8 @@ class core_question_renderer extends plugin_renderer_base {
                 $qtoutput->feedback($qa, $options), array('class' => 'feedback'));
         $output .= html_writer::nonempty_tag('div',
                 $behaviouroutput->feedback($qa, $options), array('class' => 'im-feedback'));
+        $output .= html_writer::nonempty_tag('div',
+                $options->extrainfocontent, array('class' => 'extra-feedback'));
         return $output;
     }
 
@@ -468,14 +471,10 @@ class core_question_renderer extends plugin_renderer_base {
 
             $restrictedqa = new question_attempt_with_restricted_history($qa, $i, null);
 
-            $user = new stdClass();
-            $user->id = $step->get_user_id();
-            $row = array(
-                $stepno,
-                userdate($step->get_timecreated(), get_string('strftimedatetimeshort')),
-                s($qa->summarise_action($step)),
-                $restrictedqa->get_state_string($options->correctness),
-            );
+            $row = [$stepno,
+                    userdate($step->get_timecreated(), get_string('strftimedatetimeshort')),
+                    s($qa->summarise_action($step)) . $this->action_author($step, $options),
+                    $restrictedqa->get_state_string($options->correctness)];
 
             if ($options->marks >= question_display_options::MARK_AND_MAX) {
                 $row[] = $qa->format_fraction_as_mark($step->get_fraction(), $options->markdp);
@@ -492,4 +491,20 @@ class core_question_renderer extends plugin_renderer_base {
                         array('class' => 'responsehistoryheader'));
     }
 
+    /**
+     * Action author's profile link.
+     *
+     * @param question_attempt_step $step The step.
+     * @param question_display_options $options The display options.
+     * @return string The link to user's profile.
+     */
+    protected function action_author(question_attempt_step $step, question_display_options $options): string {
+        if ($options->userinfoinhistory && $step->get_user_id() != $options->userinfoinhistory) {
+            return html_writer::link(
+                    new moodle_url('/user/view.php', ['id' => $step->get_user_id(), 'course' => $this->page->course->id]),
+                    $step->get_user_fullname(), ['class' => 'd-table-cell']);
+        } else {
+            return '';
+        }
+    }
 }

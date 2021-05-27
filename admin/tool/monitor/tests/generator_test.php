@@ -39,7 +39,7 @@ class tool_monitor_generator_testcase extends advanced_testcase {
     /**
      * Set up method.
      */
-    public function setUp() {
+    public function setUp(): void {
         // Enable monitor.
         set_config('enablemonitor', 1, 'tool_monitor');
     }
@@ -89,7 +89,7 @@ class tool_monitor_generator_testcase extends advanced_testcase {
         $this->assertEquals(0, $subscription->cmid);
 
         // Make sure rule id is always required.
-        $this->setExpectedException('coding_exception');
+        $this->expectException('coding_exception');
         unset($record->ruleid);
         $monitorgenerator->create_subscription($record);
     }

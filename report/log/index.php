@@ -22,6 +22,8 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+use core\report_helper;
+
 require('../../config.php');
 require_once($CFG->dirroot.'/course/lib.php');
 require_once($CFG->dirroot.'/report/log/locallib.php');
@@ -42,6 +44,7 @@ $chooselog   = optional_param('chooselog', false, PARAM_BOOL);
 $logformat   = optional_param('download', '', PARAM_ALPHA);
 $logreader      = optional_param('logreader', '', PARAM_COMPONENT); // Reader which will be used for displaying logs.
 $edulevel    = optional_param('edulevel', -1, PARAM_INT); // Educational level.
+$origin      = optional_param('origin', '', PARAM_TEXT); // Event origin.
 
 $params = array();
 if (!empty($id)) {
@@ -89,7 +92,9 @@ if ($logreader !== '') {
 if (($edulevel != -1)) {
     $params['edulevel'] = $edulevel;
 }
-
+if ($origin !== '') {
+    $params['origin'] = $origin;
+}
 // Legacy store hack, as edulevel is not supported.
 if ($logreader == 'logstore_legacy') {
     $params['edulevel'] = -1;
@@ -99,6 +104,8 @@ $url = new moodle_url("/report/log/index.php", $params);
 
 $PAGE->set_url('/report/log/index.php', array('id' => $id));
 $PAGE->set_pagelayout('report');
+
+report_helper::save_selected_report($id, $url);
 
 // Get course details.
 $course = null;
@@ -146,7 +153,7 @@ if (empty($course) || ($course->id == $SITE->id)) {
 }
 
 $reportlog = new report_log_renderable($logreader, $course, $user, $modid, $modaction, $group, $edulevel, $showcourses, $showusers,
-        $chooselog, true, $url, $date, $logformat, $page, $perpage, 'timecreated DESC');
+        $chooselog, true, $url, $date, $logformat, $page, $perpage, 'timecreated DESC', $origin);
 $readers = $reportlog->get_readers();
 $output = $PAGE->get_renderer('report_log');
 
@@ -160,6 +167,9 @@ if (empty($readers)) {
 
         if (empty($logformat)) {
             echo $output->header();
+            // Print selector dropdown.
+            $pluginname = get_string('pluginname', 'report_log');
+            report_helper::print_report_selector($pluginname);
             $userinfo = get_string('allparticipants');
             $dateinfo = get_string('alldays');
 
@@ -181,6 +191,9 @@ if (empty($readers)) {
         }
     } else {
         echo $output->header();
+        // Print selector dropdown.
+        $pluginname = get_string('pluginname', 'report_log');
+        report_helper::print_report_selector($pluginname);
         echo $output->heading(get_string('chooselogs') .':');
         echo $output->render($reportlog);
     }

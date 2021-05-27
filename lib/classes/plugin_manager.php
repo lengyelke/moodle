@@ -59,11 +59,20 @@ class core_plugin_manager {
     const REQUIREMENT_STATUS_OUTDATED = 'outdated';
     /** the required dependency is not installed */
     const REQUIREMENT_STATUS_MISSING = 'missing';
+    /** the current Moodle version is too high for plugin. */
+    const REQUIREMENT_STATUS_NEWER = 'newer';
 
     /** the required dependency is available in the plugins directory */
     const REQUIREMENT_AVAILABLE = 'available';
     /** the required dependency is available in the plugins directory */
     const REQUIREMENT_UNAVAILABLE = 'unavailable';
+
+    /** the moodle version is explicitly supported */
+    const VERSION_SUPPORTED = 'supported';
+    /** the moodle version is not explicitly supported */
+    const VERSION_NOT_SUPPORTED = 'notsupported';
+    /** the plugin does not specify supports */
+    const VERSION_NO_SUPPORTS = 'nosupports';
 
     /** @var core_plugin_manager holds the singleton instance */
     protected static $singletoninstance;
@@ -146,7 +155,7 @@ class core_plugin_manager {
     public function get_plugin_types() {
         if (func_num_args() > 0) {
             if (!func_get_arg(0)) {
-                throw coding_exception('core_plugin_manager->get_plugin_types() does not support relative paths.');
+                throw new coding_exception('core_plugin_manager->get_plugin_types() does not support relative paths.');
             }
         }
         if ($this->plugintypes) {
@@ -185,19 +194,6 @@ class core_plugin_manager {
         }
 
         $this->installedplugins = array();
-
-        // TODO: Delete this block once Moodle 2.6 or later becomes minimum required version to upgrade.
-        if ($CFG->version < 2013092001.02) {
-            // We did not upgrade the database yet.
-            $modules = $DB->get_records('modules', array(), 'name ASC', 'id, name, version');
-            foreach ($modules as $module) {
-                $this->installedplugins['mod'][$module->name] = $module->version;
-            }
-            $blocks = $DB->get_records('block', array(), 'name ASC', 'id, name, version');
-            foreach ($blocks as $block) {
-                $this->installedplugins['block'][$block->name] = $block->version;
-            }
-        }
 
         $versions = $DB->get_records('config_plugins', array('name'=>'version'));
         foreach ($versions as $version) {
@@ -524,10 +520,10 @@ class core_plugin_manager {
 
     /**
      * Returns list of plugins that define their subplugins and the information
-     * about them from the db/subplugins.php file.
+     * about them from the db/subplugins.json file.
      *
      * @return array with keys like 'mod_quiz', and values the data from the
-     *      corresponding db/subplugins.php file.
+     *      corresponding db/subplugins.json file.
      */
     public function get_subplugins() {
 
@@ -750,10 +746,21 @@ class core_plugin_manager {
      *
      * @param int $moodleversion the version from version.php.
      * @param array $failedplugins to return the list of plugins with non-satisfied dependencies
+     * @param int $branch the current moodle branch, null if not provided
      * @return bool true if all the dependencies are satisfied for all plugins.
      */
-    public function all_plugins_ok($moodleversion, &$failedplugins = array()) {
-
+    public function all_plugins_ok($moodleversion, &$failedplugins = array(), $branch = null) {
+        global $CFG;
+        if (empty($branch)) {
+            $branch = $CFG->branch ?? '';
+            if (empty($branch)) {
+                // During initial install there is no branch set.
+                require($CFG->dirroot . '/version.php');
+                $branch = (int)$branch;
+                // Force CFG->branch to int value during install.
+                $CFG->branch = $branch;
+            }
+        }
         $return = true;
         foreach ($this->get_plugins() as $type => $plugins) {
             foreach ($plugins as $plugin) {
@@ -764,6 +771,11 @@ class core_plugin_manager {
                 }
 
                 if (!$this->are_dependencies_satisfied($plugin->get_other_required_plugins())) {
+                    $return = false;
+                    $failedplugins[] = $plugin->component;
+                }
+
+                if (!$plugin->is_core_compatible_satisfied($branch)) {
                     $return = false;
                     $failedplugins[] = $plugin->component;
                 }
@@ -807,7 +819,7 @@ class core_plugin_manager {
         }
 
         $reqs = array();
-        $reqcore = $this->resolve_core_requirements($plugin, $moodleversion);
+        $reqcore = $this->resolve_core_requirements($plugin, $moodleversion, $moodlebranch);
 
         if (!empty($reqcore)) {
             $reqs['core'] = $reqcore;
@@ -827,7 +839,7 @@ class core_plugin_manager {
      * @param string|int|double $moodleversion moodle core branch to check against
      * @return stdObject
      */
-    protected function resolve_core_requirements(\core\plugininfo\base $plugin, $moodleversion) {
+    protected function resolve_core_requirements(\core\plugininfo\base $plugin, $moodleversion, $moodlebranch) {
 
         $reqs = (object)array(
             'hasver' => null,
@@ -835,7 +847,6 @@ class core_plugin_manager {
             'status' => null,
             'availability' => null,
         );
-
         $reqs->hasver = $moodleversion;
 
         if (empty($plugin->versionrequires)) {
@@ -848,6 +859,14 @@ class core_plugin_manager {
             $reqs->status = self::REQUIREMENT_STATUS_OK;
         } else {
             $reqs->status = self::REQUIREMENT_STATUS_OUTDATED;
+        }
+
+        // Now check if there is an explicit incompatible, supersedes requires.
+        if (isset($plugin->pluginincompatible) && $plugin->pluginincompatible != null) {
+            if (!$plugin->is_core_compatible_satisfied($moodlebranch)) {
+
+                $reqs->status = self::REQUIREMENT_STATUS_NEWER;
+            }
         }
 
         return $reqs;
@@ -901,6 +920,49 @@ class core_plugin_manager {
         }
 
         return $reqs;
+    }
+
+    /**
+     * Helper method to determine whether a moodle version is explicitly supported.
+     *
+     * @param \core\plugininfo\base $plugin the plugin we are checking
+     * @param int $branch the moodle branch to check support for
+     * @return string
+     */
+    public function check_explicitly_supported($plugin, $branch) : string {
+        // Check for correctly formed supported.
+        if (isset($plugin->pluginsupported)) {
+            // Broken apart for readability.
+            $error = false;
+            if (!is_array($plugin->pluginsupported)) {
+                $error = true;
+            }
+            if (!is_int($plugin->pluginsupported[0]) || !is_int($plugin->pluginsupported[1])) {
+                $error = true;
+            }
+            if (count($plugin->pluginsupported) != 2) {
+                $error = true;
+            }
+            if ($error) {
+                throw new coding_exception(get_string('err_supported_syntax', 'core_plugin'));
+            }
+        }
+
+        if (isset($plugin->pluginsupported) && $plugin->pluginsupported != null) {
+            if ($plugin->pluginsupported[0] <= $branch && $branch <= $plugin->pluginsupported[1]) {
+                return self::VERSION_SUPPORTED;
+            } else {
+                return self::VERSION_NOT_SUPPORTED;
+            }
+        } else {
+            // If supports aren't specified, but incompatible is, return not supported if not incompatible.
+            if (!isset($plugin->pluginsupported) && isset($plugin->pluginincompatible) && !empty($plugin->pluginincompatible)) {
+                if (!$plugin->is_core_compatible_satisfied($branch)) {
+                    return self::VERSION_NOT_SUPPORTED;
+                }
+            }
+            return self::VERSION_NO_SUPPORTS;
+        }
     }
 
     /**
@@ -1659,12 +1721,20 @@ class core_plugin_manager {
         // Moodle 2.3 supports upgrades from 2.2.x only.
         $plugins = array(
             'qformat' => array('blackboard', 'learnwise'),
+            'auth' => array('radius', 'fc', 'nntp', 'pam', 'pop3', 'imap'),
+            'block' => array('course_overview', 'messages', 'community', 'participants'),
+            'cachestore' => array('memcache'),
             'enrol' => array('authorize'),
+            'quizaccess' => array('safebrowser'),
+            'report' => array('search'),
+            'repository' => array('alfresco'),
             'tinymce' => array('dragmath'),
-            'tool' => array('bloglevelupgrade', 'qeupgradehelper', 'timezoneimport'),
-            'theme' => array('mymobile', 'afterburner', 'anomaly', 'arialist', 'binarius', 'boxxie', 'brick', 'formal_white',
-                'formfactor', 'fusion', 'leatherbound', 'magazine', 'nimble', 'nonzero', 'overlay', 'serenity', 'sky_high',
-                'splash', 'standard', 'standardold'),
+            'tool' => array('bloglevelupgrade', 'qeupgradehelper', 'timezoneimport', 'assignmentupgrade'),
+            'theme' => array('bootstrapbase', 'clean', 'more', 'afterburner', 'anomaly', 'arialist', 'base',
+                'binarius', 'boxxie', 'brick', 'canvas', 'formal_white', 'formfactor', 'fusion', 'leatherbound',
+                'magazine', 'mymobile', 'nimble', 'nonzero', 'overlay', 'serenity', 'sky_high', 'splash',
+                'standard', 'standardold'),
+            'webservice' => array('amf'),
         );
 
         if (!isset($plugins[$type])) {
@@ -1683,13 +1753,17 @@ class core_plugin_manager {
 
         $standard_plugins = array(
 
+            'antivirus' => array(
+                'clamav'
+            ),
+
             'atto' => array(
                 'accessibilitychecker', 'accessibilityhelper', 'align',
                 'backcolor', 'bold', 'charmap', 'clear', 'collapse', 'emoticon',
                 'equation', 'fontcolor', 'html', 'image', 'indent', 'italic',
                 'link', 'managefiles', 'media', 'noautolink', 'orderedlist',
-                'rtl', 'strike', 'subscript', 'superscript', 'table', 'title',
-                'underline', 'undo', 'unorderedlist'
+                'recordrtc', 'rtl', 'strike', 'subscript', 'superscript', 'table',
+                'title', 'underline', 'undo', 'unorderedlist', 'h5p', 'emojipicker',
             ),
 
             'assignment' => array(
@@ -1705,9 +1779,8 @@ class core_plugin_manager {
             ),
 
             'auth' => array(
-                'cas', 'db', 'email', 'fc', 'imap', 'ldap', 'manual', 'mnet',
-                'nntp', 'nologin', 'none', 'pam', 'pop3', 'radius',
-                'shibboleth', 'webservice'
+                'cas', 'db', 'email', 'ldap', 'lti', 'manual', 'mnet',
+                'nologin', 'none', 'oauth2', 'shibboleth', 'webservice'
             ),
 
             'availability' => array(
@@ -1715,17 +1788,17 @@ class core_plugin_manager {
             ),
 
             'block' => array(
-                'activity_modules', 'activity_results', 'admin_bookmarks', 'badges',
+                'accessreview', 'activity_modules', 'activity_results', 'admin_bookmarks', 'badges',
                 'blog_menu', 'blog_recent', 'blog_tags', 'calendar_month',
-                'calendar_upcoming', 'comments', 'community',
-                'completionstatus', 'course_list', 'course_overview',
-                'course_summary', 'feedback', 'glossary_random', 'html',
-                'login', 'mentees', 'messages', 'mnet_hosts', 'myprofile',
-                'navigation', 'news_items', 'online_users', 'participants',
-                'private_files', 'quiz_results', 'recent_activity',
-                'rss_client', 'search_forums', 'section_links',
+                'calendar_upcoming', 'comments',
+                'completionstatus', 'course_list', 'course_summary',
+                'feedback', 'globalsearch', 'glossary_random', 'html',
+                'login', 'lp', 'mentees', 'mnet_hosts', 'myoverview', 'myprofile',
+                'navigation', 'news_items', 'online_users',
+                'private_files', 'quiz_results', 'recent_activity', 'recentlyaccesseditems',
+                'recentlyaccessedcourses', 'rss_client', 'search_forums', 'section_links',
                 'selfcompletion', 'settings', 'site_main_menu',
-                'social_activities', 'tag_flickr', 'tag_youtube', 'tags'
+                'social_activities', 'starredcourses', 'tag_flickr', 'tag_youtube', 'tags', 'timeline'
             ),
 
             'booktool' => array(
@@ -1737,11 +1810,19 @@ class core_plugin_manager {
             ),
 
             'cachestore' => array(
-                'file', 'memcache', 'memcached', 'mongodb', 'session', 'static'
+                'file', 'memcached', 'mongodb', 'session', 'static', 'apcu', 'redis'
             ),
 
             'calendartype' => array(
                 'gregorian'
+            ),
+
+            'contenttype' => array(
+                'h5p'
+            ),
+
+            'customfield' => array(
+                'checkbox', 'date', 'select', 'text', 'textarea'
             ),
 
             'coursereport' => array(
@@ -1753,8 +1834,16 @@ class core_plugin_manager {
                 'number', 'picture', 'radiobutton', 'text', 'textarea', 'url'
             ),
 
+            'dataformat' => array(
+                'html', 'csv', 'json', 'excel', 'ods', 'pdf',
+            ),
+
             'datapreset' => array(
                 'imagegallery'
+            ),
+
+            'fileconverter' => array(
+                'unoconv', 'googledrive'
             ),
 
             'editor' => array(
@@ -1763,18 +1852,22 @@ class core_plugin_manager {
 
             'enrol' => array(
                 'category', 'cohort', 'database', 'flatfile',
-                'guest', 'imsenterprise', 'ldap', 'manual', 'meta', 'mnet',
-                'paypal', 'self'
+                'guest', 'imsenterprise', 'ldap', 'lti', 'manual', 'meta', 'mnet',
+                'paypal', 'self', 'fee',
             ),
 
             'filter' => array(
                 'activitynames', 'algebra', 'censor', 'emailprotect',
-                'emoticon', 'mathjaxloader', 'mediaplugin', 'multilang', 'tex', 'tidy',
+                'emoticon', 'displayh5p', 'mathjaxloader', 'mediaplugin', 'multilang', 'tex', 'tidy',
                 'urltolink', 'data', 'glossary'
             ),
 
             'format' => array(
                 'singleactivity', 'social', 'topics', 'weeks'
+            ),
+
+            'forumreport' => array(
+                'summary',
             ),
 
             'gradeexport' => array(
@@ -1793,6 +1886,10 @@ class core_plugin_manager {
                 'rubric', 'guide'
             ),
 
+            'h5plib' => array(
+                'v124'
+            ),
+
             'local' => array(
             ),
 
@@ -1801,7 +1898,15 @@ class core_plugin_manager {
             ),
 
             'ltiservice' => array(
-                'memberships', 'profile', 'toolproxy', 'toolsettings'
+                'gradebookservices', 'memberships', 'profile', 'toolproxy', 'toolsettings', 'basicoutcomes'
+            ),
+
+            'mlbackend' => array(
+                'php', 'python'
+            ),
+
+            'media' => array(
+                'html5audio', 'html5video', 'swf', 'videojs', 'vimeo', 'youtube'
             ),
 
             'message' => array(
@@ -1814,9 +1919,13 @@ class core_plugin_manager {
 
             'mod' => array(
                 'assign', 'assignment', 'book', 'chat', 'choice', 'data', 'feedback', 'folder',
-                'forum', 'glossary', 'imscp', 'label', 'lesson', 'lti', 'page',
+                'forum', 'glossary', 'h5pactivity', 'imscp', 'label', 'lesson', 'lti', 'page',
                 'quiz', 'resource', 'scorm', 'survey', 'url', 'wiki', 'workshop'
             ),
+
+            'paygw' => [
+                'paypal',
+            ],
 
             'plagiarism' => array(
             ),
@@ -1826,7 +1935,7 @@ class core_plugin_manager {
             ),
 
             'profilefield' => array(
-                'checkbox', 'datetime', 'menu', 'text', 'textarea'
+                'checkbox', 'datetime', 'menu', 'social', 'text', 'textarea'
             ),
 
             'qbehaviour' => array(
@@ -1855,21 +1964,25 @@ class core_plugin_manager {
             ),
 
             'quizaccess' => array(
-                'delaybetweenattempts', 'ipaddress', 'numattempts', 'openclosedate',
-                'password', 'safebrowser', 'securewindow', 'timelimit'
+                'delaybetweenattempts', 'ipaddress', 'numattempts', 'offlineattempts', 'openclosedate',
+                'password', 'seb', 'securewindow', 'timelimit'
             ),
 
             'report' => array(
-                'backups', 'completion', 'configlog', 'courseoverview', 'eventlist',
-                'log', 'loglive', 'outline', 'participation', 'progress', 'questioninstances', 'security', 'stats', 'performance',
-                'usersessions',
+                'backups', 'competency', 'completion', 'configlog', 'courseoverview', 'eventlist',
+                'infectedfiles', 'insights', 'log', 'loglive', 'outline', 'participation', 'progress',
+                'questioninstances', 'security', 'stats', 'status', 'performance', 'usersessions'
             ),
 
             'repository' => array(
-                'alfresco', 'areafiles', 'boxnet', 'coursefiles', 'dropbox', 'equella', 'filesystem',
-                'flickr', 'flickr_public', 'googledocs', 'local', 'merlot',
-                'picasa', 'recent', 'skydrive', 's3', 'upload', 'url', 'user', 'webdav',
+                'areafiles', 'boxnet', 'contentbank', 'coursefiles', 'dropbox', 'equella', 'filesystem',
+                'flickr', 'flickr_public', 'googledocs', 'local', 'merlot', 'nextcloud',
+                'onedrive', 'picasa', 'recent', 'skydrive', 's3', 'upload', 'url', 'user', 'webdav',
                 'wikimedia', 'youtube'
+            ),
+
+            'search' => array(
+                'simpledb', 'solr'
             ),
 
             'scormreport' => array(
@@ -1885,19 +1998,20 @@ class core_plugin_manager {
             ),
 
             'theme' => array(
-                'base', 'bootstrapbase', 'canvas', 'clean', 'more'
+                'boost', 'classic'
             ),
 
             'tool' => array(
-                'assignmentupgrade', 'availabilityconditions', 'behat', 'capability', 'customlang',
-                'dbtransfer', 'filetypes', 'generator', 'health', 'innodb', 'installaddon',
-                'langimport', 'log', 'messageinbound', 'multilangupgrade', 'monitor', 'phpunit', 'profiling',
-                'replace', 'spamcleaner', 'task', 'templatelibrary',
-                'unittest', 'uploadcourse', 'uploaduser', 'unsuproles', 'xmldb'
+                'analytics', 'availabilityconditions', 'behat', 'brickfield', 'capability', 'cohortroles', 'customlang',
+                'dataprivacy', 'dbtransfer', 'filetypes', 'generator', 'health', 'httpsreplace', 'innodb',
+                'installaddon', 'langimport', 'licensemanager', 'log', 'lp', 'lpimportcsv', 'lpmigrate', 'messageinbound',
+                'mobile', 'moodlenet', 'multilangupgrade', 'monitor', 'oauth2', 'phpunit', 'policy', 'profiling', 'recyclebin',
+                'replace', 'spamcleaner', 'task', 'templatelibrary', 'uploadcourse', 'uploaduser', 'unsuproles',
+                'usertours', 'xmldb'
             ),
 
             'webservice' => array(
-                'amf', 'rest', 'soap', 'xmlrpc'
+                'rest', 'soap', 'xmlrpc'
             ),
 
             'workshopallocation' => array(
@@ -1936,7 +2050,7 @@ class core_plugin_manager {
 
         if (!$this->is_plugin_folder_removable($plugin->component)) {
             throw new moodle_exception('err_removing_unremovable_folder', 'core_plugin', '',
-                array('plugin' => $pluginfo->component, 'rootdir' => $pluginfo->rootdir),
+                array('plugin' => $plugin->component, 'rootdir' => $plugin->rootdir),
                 'plugin root folder is not removable as expected');
         }
 
@@ -2212,6 +2326,11 @@ class core_plugin_manager {
      * @return bool
      */
     protected function common_uninstall_check(\core\plugininfo\base $pluginfo) {
+        global $CFG;
+        // Check if uninstall is allowed from the GUI.
+        if (!empty($CFG->uninstallclionly) && (!CLI_SCRIPT)) {
+            return false;
+        }
 
         if (!$pluginfo->is_uninstall_allowed()) {
             // The plugin's plugininfo class declares it should not be uninstalled.

@@ -40,7 +40,7 @@ $url = new moodle_url('/mod/scorm/report/userreportinteractions.php', array('id'
 $cm = get_coursemodule_from_id('scorm', $id, 0, false, MUST_EXIST);
 $course = get_course($cm->course);
 $scorm = $DB->get_record('scorm', array('id' => $cm->instance), '*', MUST_EXIST);
-$user = $DB->get_record('user', array('id' => $userid), user_picture::fields(), MUST_EXIST);
+$user = $DB->get_record('user', array('id' => $userid), implode(',', \core_user\fields::get_picture_fields()), MUST_EXIST);
 // Get list of attempts this user has made.
 $attemptids = scorm_get_all_attempts($scorm->id, $userid);
 
@@ -51,6 +51,11 @@ $PAGE->set_url($url);
 require_login($course, false, $cm);
 $contextmodule = context_module::instance($cm->id);
 require_capability('mod/scorm:viewreport', $contextmodule);
+
+// Check user has group access.
+if (!groups_user_groups_visible($course, $userid, $cm)) {
+    throw new moodle_exception('nopermissiontoshow');
+}
 
 // Trigger a user interactions viewed event.
 $event = \mod_scorm\event\interactions_viewed::create(array(

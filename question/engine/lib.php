@@ -27,19 +27,19 @@
 defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->libdir . '/filelib.php');
-require_once(dirname(__FILE__) . '/questionusage.php');
-require_once(dirname(__FILE__) . '/questionattempt.php');
-require_once(dirname(__FILE__) . '/questionattemptstep.php');
-require_once(dirname(__FILE__) . '/states.php');
-require_once(dirname(__FILE__) . '/datalib.php');
-require_once(dirname(__FILE__) . '/renderer.php');
-require_once(dirname(__FILE__) . '/bank.php');
-require_once(dirname(__FILE__) . '/../type/questiontypebase.php');
-require_once(dirname(__FILE__) . '/../type/questionbase.php');
-require_once(dirname(__FILE__) . '/../type/rendererbase.php');
-require_once(dirname(__FILE__) . '/../behaviour/behaviourtypebase.php');
-require_once(dirname(__FILE__) . '/../behaviour/behaviourbase.php');
-require_once(dirname(__FILE__) . '/../behaviour/rendererbase.php');
+require_once(__DIR__ . '/questionusage.php');
+require_once(__DIR__ . '/questionattempt.php');
+require_once(__DIR__ . '/questionattemptstep.php');
+require_once(__DIR__ . '/states.php');
+require_once(__DIR__ . '/datalib.php');
+require_once(__DIR__ . '/renderer.php');
+require_once(__DIR__ . '/bank.php');
+require_once(__DIR__ . '/../type/questiontypebase.php');
+require_once(__DIR__ . '/../type/questionbase.php');
+require_once(__DIR__ . '/../type/rendererbase.php');
+require_once(__DIR__ . '/../behaviour/behaviourtypebase.php');
+require_once(__DIR__ . '/../behaviour/behaviourbase.php');
+require_once(__DIR__ . '/../behaviour/rendererbase.php');
 require_once($CFG->libdir . '/questionlib.php');
 
 
@@ -432,7 +432,7 @@ abstract class question_engine {
     public static function get_all_response_file_areas() {
         $variables = array();
         foreach (question_bank::get_all_qtypes() as $qtype) {
-            $variables += $qtype->response_file_areas();
+            $variables = array_merge($variables, $qtype->response_file_areas());
         }
 
         $areas = array();
@@ -453,6 +453,8 @@ abstract class question_engine {
 
     /**
      * Initialise the JavaScript required on pages where questions will be displayed.
+     *
+     * @return string
      */
     public static function initialise_js() {
         return question_flags::initialise_js();
@@ -474,7 +476,10 @@ abstract class question_engine {
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class question_display_options {
-    /**#@+ @var integer named constants for the values that most of the options take. */
+    /**#@+
+     * @var integer named constants for the values that most of the options take.
+     */
+    const SHOW_ALL = -1;
     const HIDDEN = 0;
     const VISIBLE = 1;
     const EDITABLE = 2;
@@ -582,7 +587,7 @@ class question_display_options {
     /**
      * Used in places like the question history table, to show a link to review
      * this question in a certain state. If blank, a link is not shown.
-     * @var string base URL for a review question script.
+     * @var moodle_url base URL for a review question script.
      */
     public $questionreviewlink = null;
 
@@ -595,9 +600,11 @@ class question_display_options {
 
     /**
      * @since 2.9
-     * @var string extra HTML to include in the info box of the question display.
-     * This is normally shown after the information about the question, and before
-     * any controls like the flag or the edit icon.
+     * @var string extra HTML to include at the end of the outcome (feedback) box
+     * of the question display.
+     *
+     * This field is now badly named. The place it included is was changed
+     * (for the better) but the name was left unchanged for backwards compatibility.
      */
     public $extrainfocontent = '';
 
@@ -626,6 +633,11 @@ class question_display_options {
      * @var int the context the attempt being output belongs to.
      */
     public $context;
+
+    /**
+     * @var int The option to show the action author in the response history.
+     */
+    public $userinfoinhistory = self::HIDDEN;
 
     /**
      * Set all the feedback-related fields {@link $feedback}, {@link generalfeedback},
@@ -692,7 +704,7 @@ abstract class question_flags {
     public static function get_postdata(question_attempt $qa) {
         $qaid = $qa->get_database_id();
         $qubaid = $qa->get_usage_id();
-        $qid = $qa->get_question()->id;
+        $qid = $qa->get_question_id();
         $slot = $qa->get_slot();
         $checksum = self::get_toggle_checksum($qubaid, $qid, $qaid, $slot);
         return "qaid={$qaid}&qubaid={$qubaid}&qid={$qid}&slot={$slot}&checksum={$checksum}&sesskey=" .
@@ -741,13 +753,13 @@ abstract class question_flags {
         );
         $flagattributes = array(
             0 => array(
-                'src' => $OUTPUT->pix_url('i/unflagged') . '',
+                'src' => $OUTPUT->image_url('i/unflagged') . '',
                 'title' => get_string('clicktoflag', 'question'),
                 'alt' => get_string('notflagged', 'question'),
               //  'text' => get_string('clickflag', 'question'),
             ),
             1 => array(
-                'src' => $OUTPUT->pix_url('i/flagged') . '',
+                'src' => $OUTPUT->image_url('i/flagged') . '',
                 'title' => get_string('clicktounflag', 'question'),
                 'alt' => get_string('flagged', 'question'),
                // 'text' => get_string('clickunflag', 'question'),
@@ -786,6 +798,16 @@ class question_out_of_sequence_exception extends moodle_exception {
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 abstract class question_utils {
+    /**
+     * @var float tolerance to use when comparing question mark/fraction values.
+     *
+     * When comparing floating point numbers in a computer, the representation is not
+     * necessarily exact. Therefore, we need to allow a tolerance.
+     * Question marks are stored in the database as decimal numbers with 7 decimal places.
+     * Therefore, this is the appropriate tolerance to use.
+     */
+    const MARK_TOLERANCE = 0.00000005;
+
     /**
      * Tests to see whether two arrays have the same keys, with the same values
      * (as compared by ===) for each key. However, the order of the arrays does
@@ -904,6 +926,47 @@ abstract class question_utils {
     }
 
     /**
+     * Convert an integer to a letter of alphabet.
+     * @param int $number an integer between 1 and 26 inclusive.
+     * Anything else will throw an exception.
+     * @return string the number converted to upper case letter of alphabet.
+     */
+    public static function int_to_letter($number) {
+        $alphabet = [
+                '1' => 'A',
+                '2' => 'B',
+                '3' => 'C',
+                '4' => 'D',
+                '5' => 'E',
+                '6' => 'F',
+                '7' => 'G',
+                '8' => 'H',
+                '9' => 'I',
+                '10' => 'J',
+                '11' => 'K',
+                '12' => 'L',
+                '13' => 'M',
+                '14' => 'N',
+                '15' => 'O',
+                '16' => 'P',
+                '17' => 'Q',
+                '18' => 'R',
+                '19' => 'S',
+                '20' => 'T',
+                '21' => 'U',
+                '22' => 'V',
+                '23' => 'W',
+                '24' => 'X',
+                '25' => 'Y',
+                '26' => 'Z'
+        ];
+        if (!is_integer($number) || $number < 1 || $number > count($alphabet)) {
+            throw new coding_exception('Only integers between 1 and 26 can be converted to letters.', $number);
+        }
+        return $alphabet[$number];
+    }
+
+    /**
      * Typically, $mark will have come from optional_param($name, null, PARAM_RAW_TRIMMED).
      * This method copes with:
      *  - keeping null or '' input unchanged - important to let teaches set a question back to requries grading.
@@ -951,6 +1014,65 @@ abstract class question_utils {
         // matter what. We use http://example.com/.
         $text = str_replace('@@PLUGINFILE@@/', 'http://example.com/', $text);
         return html_to_text(format_text($text, $format, $options), 0, false);
+    }
+
+    /**
+     * Get the options required to configure the filepicker for one of the editor
+     * toolbar buttons.
+     * @param mixed $acceptedtypes array of types of '*'.
+     * @param int $draftitemid the draft area item id.
+     * @param object $context the context.
+     * @return object the required options.
+     */
+    protected static function specific_filepicker_options($acceptedtypes, $draftitemid, $context) {
+        $filepickeroptions = new stdClass();
+        $filepickeroptions->accepted_types = $acceptedtypes;
+        $filepickeroptions->return_types = FILE_INTERNAL | FILE_EXTERNAL;
+        $filepickeroptions->context = $context;
+        $filepickeroptions->env = 'filepicker';
+
+        $options = initialise_filepicker($filepickeroptions);
+        $options->context = $context;
+        $options->client_id = uniqid();
+        $options->env = 'editor';
+        $options->itemid = $draftitemid;
+
+        return $options;
+    }
+
+    /**
+     * Get filepicker options for question related text areas.
+     * @param object $context the context.
+     * @param int $draftitemid the draft area item id.
+     * @return array An array of options
+     */
+    public static function get_filepicker_options($context, $draftitemid) {
+        return [
+                'image' => self::specific_filepicker_options(['image'], $draftitemid, $context),
+                'media' => self::specific_filepicker_options(['video', 'audio'], $draftitemid, $context),
+                'link'  => self::specific_filepicker_options('*', $draftitemid, $context),
+            ];
+    }
+
+    /**
+     * Get editor options for question related text areas.
+     * @param object $context the context.
+     * @return array An array of options
+     */
+    public static function get_editor_options($context) {
+        global $CFG;
+
+        $editoroptions = [
+                'subdirs'  => 0,
+                'context'  => $context,
+                'maxfiles' => EDITOR_UNLIMITED_FILES,
+                'maxbytes' => $CFG->maxbytes,
+                'noclean' => 0,
+                'trusttext' => 0,
+                'autosave' => false
+        ];
+
+        return $editoroptions;
     }
 }
 

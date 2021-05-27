@@ -50,6 +50,10 @@ class MoodleQuickForm_autocomplete extends MoodleQuickForm_select {
     protected $casesensitive = false;
     /** @var bool $showsuggestions Show suggestions by default - but this can be turned off. */
     protected $showsuggestions = true;
+    /** @var string $noselectionstring String that is shown when there are no selections. */
+    protected $noselectionstring = '';
+    /** @var callable|null Function to call (with existing value) to render it to HTML */
+    protected $valuehtmlcallback = null;
 
     /**
      * constructor
@@ -60,7 +64,7 @@ class MoodleQuickForm_autocomplete extends MoodleQuickForm_select {
      * @param mixed $attributes Either a typical HTML attribute string or an associative array. Special options
      *                          "tags", "placeholder", "ajax", "multiple", "casesensitive" are supported.
      */
-    function MoodleQuickForm_autocomplete($elementName=null, $elementLabel=null, $options=null, $attributes=null) {
+    public function __construct($elementName=null, $elementLabel=null, $options=null, $attributes=null) {
         // Even if the constructor gets called twice we do not really want 2x options (crazy forms!).
         $this->_options = array();
         if ($attributes === null) {
@@ -79,6 +83,12 @@ class MoodleQuickForm_autocomplete extends MoodleQuickForm_select {
             $this->placeholder = $attributes['placeholder'];
             unset($attributes['placeholder']);
         }
+        $this->noselectionstring = get_string('noselection', 'form');
+        if (isset($attributes['noselectionstring'])) {
+            $this->noselectionstring = $attributes['noselectionstring'];
+            unset($attributes['noselectionstring']);
+        }
+
         if (isset($attributes['ajax'])) {
             $this->ajax = $attributes['ajax'];
             unset($attributes['ajax']);
@@ -87,9 +97,23 @@ class MoodleQuickForm_autocomplete extends MoodleQuickForm_select {
             $this->casesensitive = $attributes['casesensitive'] ? true : false;
             unset($attributes['casesensitive']);
         }
-        parent::HTML_QuickForm_select($elementName, $elementLabel, $options, $attributes);
+        if (isset($attributes['valuehtmlcallback'])) {
+            $this->valuehtmlcallback = $attributes['valuehtmlcallback'];
+            unset($attributes['valuehtmlcallback']);
+        }
+        parent::__construct($elementName, $elementLabel, $options, $attributes);
 
         $this->_type = 'autocomplete';
+    }
+
+    /**
+     * Old syntax of class constructor. Deprecated in PHP7.
+     *
+     * @deprecated since Moodle 3.1
+     */
+    public function MoodleQuickForm_autocomplete($elementName=null, $elementLabel=null, $options=null, $attributes=null) {
+        debugging('Use of class name as constructor is deprecated', DEBUG_DEVELOPER);
+        self::__construct($elementName, $elementLabel, $options, $attributes);
     }
 
     /**
@@ -103,10 +127,29 @@ class MoodleQuickForm_autocomplete extends MoodleQuickForm_select {
         // Enhance the select with javascript.
         $this->_generateId();
         $id = $this->getAttribute('id');
-        $PAGE->requires->js_call_amd('core/form-autocomplete', 'enhance', $params = array('#' . $id, $this->tags, $this->ajax,
-            $this->placeholder, $this->casesensitive, $this->showsuggestions));
 
-        return parent::toHTML();
+        if (!$this->isFrozen()) {
+            $PAGE->requires->js_call_amd('core/form-autocomplete', 'enhance', $params = array('#' . $id, $this->tags, $this->ajax,
+                $this->placeholder, $this->casesensitive, $this->showsuggestions, $this->noselectionstring));
+        }
+
+        $html = parent::toHTML();
+
+        // Hacky bodge to add in the HTML code to the option tag. There is a nicer
+        // version of this code in the new template version (see export_for_template).
+        if ($this->valuehtmlcallback) {
+            $html = preg_replace_callback('~value="([^"]+)"~', function($matches) {
+                $value = html_entity_decode($matches[1]);
+                $htmlvalue = call_user_func($this->valuehtmlcallback, $value);
+                if ($htmlvalue !== false) {
+                    return $matches[0] . ' data-html="' . s($htmlvalue) . '"';
+                } else {
+                    return $matches[0];
+                }
+            }, $html);
+        }
+
+        return $html;
     }
 
     /**
@@ -161,7 +204,7 @@ class MoodleQuickForm_autocomplete extends MoodleQuickForm_select {
             // Normally this is cleaned as a side effect of it not being a valid option,
             // but in this case we need to detect and skip it manually.
             if ($value === '_qf__force_multiselect_submission' || $value === null) {
-                $value = '';
+                $value = $this->getMultiple() ? [] : '';
             }
             return $this->_prepareValue($value, $assoc);
         } else {
@@ -185,5 +228,27 @@ class MoodleQuickForm_autocomplete extends MoodleQuickForm_select {
                 break;
         }
         return parent::onQuickFormEvent($event, $arg, $caller);
+    }
+
+    public function export_for_template(renderer_base $output) {
+        $this->_generateId();
+        $context = parent::export_for_template($output);
+        $context['tags'] = !empty($this->tags);
+        $context['ajax'] = $this->ajax;
+        $context['placeholder'] = $this->placeholder;
+        $context['casesensitive'] = !empty($this->casesensitive);
+        $context['showsuggestions'] = !empty($this->showsuggestions);
+        $context['noselectionstring'] = $this->noselectionstring;
+        if ($this->valuehtmlcallback) {
+            foreach ($context['options'] as &$option) {
+                $value = $option['value'];
+                $html = call_user_func($this->valuehtmlcallback, $value);
+                if ($html !== false) {
+                    $option['html'] = $html;
+                }
+            }
+        }
+
+        return $context;
     }
 }

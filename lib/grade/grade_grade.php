@@ -173,6 +173,22 @@ class grade_grade extends grade_object {
     public $aggregationweight = null;
 
     /**
+     * Feedback files to copy.
+     *
+     * Example -
+     *
+     * [
+     *     'contextid' => 1,
+     *     'component' => 'mod_xyz',
+     *     'filearea' => 'mod_xyz_feedback',
+     *     'itemid' => 2
+     * ];
+     *
+     * @var array
+     */
+    public $feedbackfiles = [];
+
+    /**
      * Returns array of grades for given grade_item+users
      *
      * @param grade_item $grade_item
@@ -234,6 +250,10 @@ class grade_grade extends grade_object {
         } else if ($this->grade_item->id != $this->itemid) {
             debugging('Itemid mismatch');
             $this->grade_item = grade_item::fetch(array('id'=>$this->itemid));
+        }
+
+        if (empty($this->grade_item)) {
+            debugging("Missing grade item id $this->itemid", DEBUG_DEVELOPER);
         }
 
         return $this->grade_item;
@@ -352,9 +372,9 @@ class grade_grade extends grade_object {
 
         // Check to see if the gradebook is frozen. This allows grades to not be altered at all until a user verifies that they
         // wish to update the grades.
-        $gradebookcalculationsfreeze = get_config('core', 'gradebook_calculations_freeze_' . $this->grade_item->courseid);
+        $gradebookcalculationsfreeze = 'gradebook_calculations_freeze_' . $this->grade_item->courseid;
         // Gradebook is frozen, run through old code.
-        if ($gradebookcalculationsfreeze && (int)$gradebookcalculationsfreeze <= 20150627) {
+        if (isset($CFG->$gradebookcalculationsfreeze) && (int)$CFG->$gradebookcalculationsfreeze <= 20150627) {
             // Only aggregate items use separate min grades.
             if ($minmaxtouse == GRADE_MIN_MAX_FROM_GRADE_GRADE || $this->grade_item->is_aggregate_item()) {
                 return array($this->rawgrademin, $this->rawgrademax);
@@ -727,8 +747,9 @@ class grade_grade extends grade_object {
      *
      * @param array $grade_grades all course grades of one user, & used for better internal caching
      * @param array $grade_items array of grade items, & used for better internal caching
-     * @return array This is an array of 3 arrays:
-     *      unknown => list of item ids that may be affected by hiding (with the calculated grade as the value)
+     * @return array This is an array of following arrays:
+     *      unknown => list of item ids that may be affected by hiding (with the ITEM ID as both the key and the value) - for BC with old gradereport plugins
+     *      unknowngrades => list of item ids that may be affected by hiding (with the calculated grade as the value)
      *      altered => list of item ids that are definitely affected by hiding (with the calculated grade as the value)
      *      alteredgrademax => for each item in altered or unknown, the new value of the grademax
      *      alteredgrademin => for each item in altered or unknown, the new value of the grademin
@@ -759,13 +780,15 @@ class grade_grade extends grade_object {
             $dependson[$grade_grade->itemid] = $grade_items[$grade_grade->itemid]->depends_on();
             if ($grade_grade->is_excluded()) {
                 //nothing to do, aggregation is ok
+                continue;
             } else if ($grade_grade->is_hidden()) {
                 $hiddenfound = true;
                 $altered[$grade_grade->itemid] = null;
                 $alteredaggregationstatus[$grade_grade->itemid] = 'dropped';
                 $alteredaggregationweight[$grade_grade->itemid] = 0;
-            } else if ($grade_grade->is_locked() or $grade_grade->is_overridden()) {
-                // no need to recalculate locked or overridden grades
+            } else if ($grade_grade->is_overridden()) {
+                // No need to recalculate overridden grades.
+                continue;
             } else {
                 if (!empty($dependson[$grade_grade->itemid])) {
                     $dependencydepth[$grade_grade->itemid] = 1;
@@ -779,6 +802,7 @@ class grade_grade extends grade_object {
 
         if (!$hiddenfound) {
             return array('unknown' => array(),
+                         'unknowngrades' => array(),
                          'altered' => array(),
                          'alteredgrademax' => array(),
                          'alteredgrademin' => array(),
@@ -795,18 +819,28 @@ class grade_grade extends grade_object {
         for($i=0; $i<$max; $i++) {
             $found = false;
             foreach($todo as $key=>$do) {
-                $hidden_precursors = array_intersect($dependson[$do], $unknown);
+                $hidden_precursors = array_intersect($dependson[$do], array_keys($unknown));
                 if ($hidden_precursors) {
                     // this item depends on hidden grade indirectly
-                    $unknown[$do] = $do;
+                    $unknown[$do] = $grade_grades[$do]->finalgrade;
                     unset($todo[$key]);
                     $found = true;
                     continue;
 
                 } else if (!array_intersect($dependson[$do], $todo)) {
                     $hidden_precursors = array_intersect($dependson[$do], array_keys($altered));
-                    if (!$hidden_precursors) {
-                        // hiding does not affect this grade
+                    // If the dependency is a sum aggregation, we need to process it as if it had hidden items.
+                    // The reason for this, is that the code will recalculate the maxgrade by removing ungraded
+                    // items and accounting for 'drop x grades' and then stored back in our virtual grade_items.
+                    // This recalculation is necessary because there will be a call to:
+                    //              $grade_category->aggregate_values_and_adjust_bounds
+                    // for the top level grade that will depend on knowing what that caclulated grademax is
+                    // and it finds that value by checking the virtual grade_items.
+                    $issumaggregate = false;
+                    if ($grade_items[$do]->itemtype == 'category') {
+                        $issumaggregate = $grade_items[$do]->load_item_category()->aggregation == GRADE_AGGREGATE_SUM;
+                    }
+                    if (!$hidden_precursors && !$issumaggregate) {
                         unset($todo[$key]);
                         $found = true;
                         continue;
@@ -814,11 +848,13 @@ class grade_grade extends grade_object {
                     } else {
                         // depends on altered grades - we should try to recalculate if possible
                         if ($grade_items[$do]->is_calculated() or
-                            (!$grade_items[$do]->is_category_item() and !$grade_items[$do]->is_course_item())
+                            (!$grade_items[$do]->is_category_item() and !$grade_items[$do]->is_course_item()) or
+                            ($grade_items[$do]->is_category_item() and $grade_items[$do]->is_locked())
                         ) {
                             // This is a grade item that is not a category or course and has been affected by grade hiding.
+                            // Or a grade item that is a category and it is locked.
                             // I guess this means it is a calculation that needs to be recalculated.
-                            $unknown[$do] = $do;
+                            $unknown[$do] = $grade_grades[$do]->finalgrade;
                             unset($todo[$key]);
                             $found = true;
                             continue;
@@ -943,7 +979,8 @@ class grade_grade extends grade_object {
             }
         }
 
-        return array('unknown' => $unknown,
+        return array('unknown' => array_combine(array_keys($unknown), array_keys($unknown)), // Left for BC in case some gradereport plugins expect it.
+                     'unknowngrades' => $unknown,
                      'altered' => $altered,
                      'alteredgrademax' => $alteredgrademax,
                      'alteredgrademin' => $alteredgrademin,
@@ -1004,11 +1041,75 @@ class grade_grade extends grade_object {
      * @return bool success
      */
     public function update($source=null) {
-        $this->rawgrade    = grade_floatval($this->rawgrade);
-        $this->finalgrade  = grade_floatval($this->finalgrade);
+        $this->rawgrade = grade_floatval($this->rawgrade);
+        $this->finalgrade = grade_floatval($this->finalgrade);
         $this->rawgrademin = grade_floatval($this->rawgrademin);
         $this->rawgrademax = grade_floatval($this->rawgrademax);
         return parent::update($source);
+    }
+
+
+    /**
+     * Handles adding feedback files in the gradebook.
+     *
+     * @param int|null $historyid
+     */
+    protected function add_feedback_files(int $historyid = null) {
+        global $CFG;
+
+        // We only support feedback files for modules atm.
+        if ($this->grade_item && $this->grade_item->is_external_item()) {
+            $context = $this->get_context();
+            $this->copy_feedback_files($context, GRADE_FEEDBACK_FILEAREA, $this->id);
+
+            if (empty($CFG->disablegradehistory) && $historyid) {
+                $this->copy_feedback_files($context, GRADE_HISTORY_FEEDBACK_FILEAREA, $historyid);
+            }
+        }
+
+        return $this->id;
+    }
+
+    /**
+     * Handles updating feedback files in the gradebook.
+     *
+     * @param int|null $historyid
+     */
+    protected function update_feedback_files(int $historyid = null) {
+        global $CFG;
+
+        // We only support feedback files for modules atm.
+        if ($this->grade_item && $this->grade_item->is_external_item()) {
+            $context = $this->get_context();
+
+            $fs = new file_storage();
+            $fs->delete_area_files($context->id, GRADE_FILE_COMPONENT, GRADE_FEEDBACK_FILEAREA, $this->id);
+
+            $this->copy_feedback_files($context, GRADE_FEEDBACK_FILEAREA, $this->id);
+
+            if (empty($CFG->disablegradehistory) && $historyid) {
+                $this->copy_feedback_files($context, GRADE_HISTORY_FEEDBACK_FILEAREA, $historyid);
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Handles deleting feedback files in the gradebook.
+     */
+    protected function delete_feedback_files() {
+        // We only support feedback files for modules atm.
+        if ($this->grade_item && $this->grade_item->is_external_item()) {
+            $context = $this->get_context();
+
+            $fs = new file_storage();
+            $fs->delete_area_files($context->id, GRADE_FILE_COMPONENT, GRADE_FEEDBACK_FILEAREA, $this->id);
+
+            // Grade history only gets deleted when we delete the whole grade item.
+        }
+
+        return true;
     }
 
     /**
@@ -1018,14 +1119,17 @@ class grade_grade extends grade_object {
      * @return bool Returns true if the deletion was successful, false otherwise.
      */
     public function delete($source = null) {
+        global $DB;
+
+        $transaction = $DB->start_delegated_transaction();
         $success = parent::delete($source);
 
         // If the grade was deleted successfully trigger a grade_deleted event.
-        if ($success) {
-            $this->load_grade_item();
+        if ($success && !empty($this->grade_item)) {
             \core\event\grade_deleted::create_from_grade($this)->trigger();
         }
 
+        $transaction->allow_commit();
         return $success;
     }
 
@@ -1060,8 +1164,10 @@ class grade_grade extends grade_object {
             return;
         }
 
-        // Load information about grade item
-        $this->load_grade_item();
+        // Load information about grade item, exit if the grade item is missing.
+        if (!$this->load_grade_item()) {
+            return;
+        }
 
         // Only course-modules have completion data
         if ($this->grade_item->itemtype!='mod') {
@@ -1107,5 +1213,45 @@ class grade_grade extends grade_object {
     function get_aggregation_hint() {
         return array('status' => $this->get_aggregationstatus(),
                      'weight' => $this->get_aggregationweight());
+    }
+
+    /**
+     * Handles copying feedback files to a specified gradebook file area.
+     *
+     * @param context $context
+     * @param string $filearea
+     * @param int $itemid
+     */
+    private function copy_feedback_files(context $context, string $filearea, int $itemid) {
+        if ($this->feedbackfiles) {
+            $filestocopycontextid = $this->feedbackfiles['contextid'];
+            $filestocopycomponent = $this->feedbackfiles['component'];
+            $filestocopyfilearea = $this->feedbackfiles['filearea'];
+            $filestocopyitemid = $this->feedbackfiles['itemid'];
+
+            $fs = new file_storage();
+            if ($filestocopy = $fs->get_area_files($filestocopycontextid, $filestocopycomponent, $filestocopyfilearea,
+                    $filestocopyitemid)) {
+                foreach ($filestocopy as $filetocopy) {
+                    $destination = [
+                        'contextid' => $context->id,
+                        'component' => GRADE_FILE_COMPONENT,
+                        'filearea' => $filearea,
+                        'itemid' => $itemid
+                    ];
+                    $fs->create_file_from_storedfile($destination, $filetocopy);
+                }
+            }
+        }
+    }
+
+    /**
+     * Determine the correct context for this grade_grade.
+     *
+     * @return context
+     */
+    public function get_context() {
+        $this->load_grade_item();
+        return $this->grade_item->get_context();
     }
 }
