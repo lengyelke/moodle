@@ -180,7 +180,8 @@ class core_user_external extends external_api {
             // Make sure we validate current user info as handled by current GUI. See user/editadvanced_form.php func validation().
             if (!validate_email($user['email'])) {
                 throw new invalid_parameter_exception('Email address is invalid: '.$user['email']);
-            } else if ($DB->record_exists('user', array('email' => $user['email'], 'mnethostid' => $user['mnethostid']))) {
+            } else if (empty($CFG->allowaccountssameemail) &&
+                    $DB->record_exists('user', array('email' => $user['email'], 'mnethostid' => $user['mnethostid']))) {
                 throw new invalid_parameter_exception('Email address already exists: '.$user['email']);
             }
             // End of user info validation.
@@ -389,7 +390,7 @@ class core_user_external extends external_api {
      * @since Moodle 2.2
      */
     public static function update_users($users) {
-        global $CFG, $DB;
+        global $CFG, $DB, $USER;
         require_once($CFG->dirroot."/user/lib.php");
         require_once($CFG->dirroot."/user/profile/lib.php"); // Required for customfields related function.
 
@@ -403,6 +404,18 @@ class core_user_external extends external_api {
         $transaction = $DB->start_delegated_transaction();
 
         foreach ($params['users'] as $user) {
+            // First check the user exists.
+            if (!$existinguser = core_user::get_user($user['id'])) {
+                continue;
+            }
+            // Check if we are trying to update an admin.
+            if ($existinguser->id != $USER->id and is_siteadmin($existinguser) and !is_siteadmin($USER)) {
+                continue;
+            }
+            // Other checks (deleted, remote or guest users).
+            if ($existinguser->deleted or is_mnet_remote_user($existinguser) or isguestuser($existinguser->id)) {
+                continue;
+            }
             user_update_user($user, true, false);
             // Update user custom fields.
             if (!empty($user['customfields'])) {

@@ -63,9 +63,13 @@ if ($id) {
 
 $sitecontext = context_system::instance();
 $usercontext = context_user::instance($userid);
-$PAGE->set_context($usercontext);
-$blognode = $PAGE->settingsnav->find('blogadd', null);
-$blognode->make_active();
+if ($modid) {
+    $PAGE->set_context($sitecontext);
+} else {
+    $PAGE->set_context($usercontext);
+    $blognode = $PAGE->settingsnav->find('blogadd', null);
+    $blognode->make_active();
+}
 
 require_login($courseid);
 
@@ -138,14 +142,15 @@ if ($action === 'delete') {
         $PAGE->set_heading($SITE->fullname);
         echo $OUTPUT->header();
 
+        echo $OUTPUT->confirm(get_string('blogdeleteconfirm', 'blog'),
+                              new moodle_url('edit.php', $optionsyes),
+                              new moodle_url('index.php', $optionsno));
+
+        echo '<br />';
         // Output the entry.
         $entry->prepare_render();
         echo $output->render($entry);
 
-        echo '<br />';
-        echo $OUTPUT->confirm(get_string('blogdeleteconfirm', 'blog'),
-                              new moodle_url('edit.php', $optionsyes),
-                              new moodle_url('index.php', $optionsno));
         echo $OUTPUT->footer();
         die;
     }
